@@ -1,0 +1,30 @@
+&g3dv_grid
+  grid_nx = 720
+  grid_ny = 410
+  grid_nz = 40
+/
+
+
+
+&g3dv_obs
+  ! single obs tests
+  test_obs = .true.
+  test_obs_max  = 20
+/
+
+&single_ob
+  ! enabled only if single_ob_tes and single_ob_num
+  ! are set in the g3dv_obs section
+/
+
+&g3dv_solver
+  maxitr = 15
+  conv_ratio = 1e2
+/
+
+
+&g3dv_bgcov
+  hz_cor = 700e3, 200e3
+  ssh_grad_tensor = 0.2
+  time_sigma = 120.0
+/
