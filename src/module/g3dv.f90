@@ -3,10 +3,12 @@ module godas_3dvar
   use g3dv_datatable
   use g3dv_grid
   use g3dv_obs
+  use g3dv_obs_dat
+  use g3dv_obs_nc 
   use g3dv_solver
   use g3dv_bgcov
   use timing 
-
+  use netcdf
 
   implicit none
   private
@@ -41,19 +43,23 @@ contains
     character(len=1024) :: nml_filename="namelist.3dvar"
     logical :: ex
     integer :: timer_ini
+    class(obsio),  pointer :: obsio_ptr
 
+    
     ! initialize some of the timers we are using
     timer_total = timer_init('TOTAL')
     timer_ini   = timer_init('(init)')
     call timer_start(timer_total)
     call timer_start(timer_ini)
 
+    
     !TODO, allow for passing of mpi_comm from outside
     ! initialize mpi library
     call g3dv_mpi_init()
     call timing_init(g3dv_mpi_comm, g3dv_mpi_root)
     isroot = g3dv_mpi_isroot
 
+    
     ! print header
     if(isroot) then
        print *,new_line('a'),"============================================================",&
@@ -64,6 +70,7 @@ contains
             new_line('a')
     end if
 
+    
     ! make sure the namelist is there
     inquire(file=nml_filename, exist=ex)
     if (.not. ex) then
@@ -74,18 +81,25 @@ contains
        print *, 'Using namelist file: ', trim(nml_filename)
     end if
 
-    ! initialize grid / state variables
-    call datatable_init(isroot, 'data_table.3dvar')
-    call grid_init(isroot, nml_filename)
-    call g3dv_mpi_setgrid(grid_nx, grid_ny, grid_nz)
-    call grid_scatter()
+     ! initialize grid / state variables
+     call datatable_init(isroot, 'data_table.3dvar')
+     call grid_init(isroot, nml_filename)
+    
+    
+     ! initialize background error covariance model
+     call bgcov_init(isroot, nml_filename)
 
-    ! initizlie observations
-    call obs_init(isroot, nml_filename)
+    
+     ! initialize observations
+     allocate(obsio_dat :: obsio_ptr)
+     call obs_obsio_reg(obsio_ptr)
+     allocate(obsio_nc :: obsio_ptr)
+     call obs_obsio_reg(obsio_ptr)    
+     call obs_init(isroot, nml_filename, bgcov_local_vtloc, bgcov_local_var)  
 
-    ! initialize other modules 
-    call solver_init(isroot, nml_filename)
-    call bgcov_init(isroot, nml_filename)
+    
+     ! initialize other modules 
+     call solver_init(isroot, nml_filename)
 
 
     ! all done
@@ -101,11 +115,10 @@ contains
 
 
   subroutine g3dv_run()
-    real, allocatable :: ai(:,:,:)
+    real :: local_ai(grid_ns, g3dv_mpi_ijcount)
 
     integer :: timer_output
 
-    
     !make sure the module has been initialized first
     if( .not. initialized) then
        print *, "ERROR: calling g3dv_run() before g3dv_init()"
@@ -120,18 +133,118 @@ contains
             new_line('a'), "============================================================"
     end if
 
-    call solver_run(ai)
-
+    call solver_run(local_ai)
+    
     ! TODO, make output to file or retreival from  module API configurable
     timer_output = timer_init('(Output)', TIMER_SYNC)
     call timer_start(timer_output)
-    if(isroot) then
-       call grid_write(ai, "ai.nc")
-    end if
+    call write_output(local_ai, "output.nc")
     call timer_stop(timer_output)
 
   end subroutine g3dv_run
 
+
+
+  !================================================================================
+  !================================================================================
+
+
+
+  subroutine write_output(grd, filename)
+    real, intent(in) :: grd(grid_ns, g3dv_mpi_ijcount)
+    character(len=*), intent(in) :: filename
+
+    integer :: i
+    integer :: ncid
+    integer :: d_x, d_y, d_z
+    integer :: v_x, v_y, v_z
+    integer :: v_ai_t, v_ai_s
+    integer :: v_vtloc
+
+    real, allocatable :: tmp2d(:,:)
+    real, allocatable :: tmp3d(:,:,:)
+    real :: tmpij(g3dv_mpi_ijcount)
+    
+
+    ! setup the output file
+    if(isroot) then
+       print*, 'Saving analysis grid to "', trim(filename), '"'
+
+       call check(nf90_create(filename, NF90_WRITE, ncid))
+       
+       call check(nf90_def_dim(ncid, "grid_x", grid_nx, d_x))
+       call check(nf90_def_var(ncid, "grid_x", nf90_real, (/d_x/), v_x))
+       call check(nf90_put_att(ncid, v_x, "units", "degrees_east"))
+       
+       call check(nf90_def_dim(ncid, "grid_y", grid_ny, d_y))
+       call check(nf90_def_var(ncid, "grid_y", nf90_real, (/d_y/), v_y))
+       call check(nf90_put_att(ncid, v_y, "units", "degrees_north"))
+       
+       call check(nf90_def_dim(ncid, "grid_z", grid_nz, d_z))
+       call check(nf90_def_var(ncid, "grid_z", nf90_real, (/d_z/), v_z))
+       call check(nf90_put_att(ncid, v_z, "units", "meters"))
+
+       call check(nf90_def_var(ncid, "ai_temp", nf90_real, (/d_x, d_y, d_z/), v_ai_t))
+       call check(nf90_def_var(ncid, "ai_salt", nf90_real, (/d_x, d_y, d_z/), v_ai_s))
+
+       ! other optional diagnostics
+       call check(nf90_def_var(ncid, "vtloc_dist", nf90_real, (/d_x, d_y, d_z/), v_vtloc))
+       
+
+       call check(nf90_enddef(ncid))
+    end if
+    if(isroot) then
+       allocate(tmp2d(grid_nx, grid_ny))
+       allocate(tmp3d(grid_nx, grid_ny, grid_nz))
+    else
+       allocate(tmp2d(1,1))
+       allocate(tmp3d(1,1,1))
+    end if
+    
+
+    ! gather data from the procs as needed and save to file
+    !------------------------------------------------------------
+    ! depth
+    if(isroot) call check(nf90_put_var(ncid, v_z, grid_dpth))
+
+    ! lat
+    call g3dv_mpi_ij2grd_real(grid_local_lat, tmp2d)
+    if(isroot) call check(nf90_put_var(ncid, v_y, maxval(tmp2d, 1, tmp2d < 100)))
+
+    ! lon
+    call g3dv_mpi_ij2grd_real(grid_local_lon, tmp2d)
+    if(isroot) call check(nf90_put_var(ncid, v_x, tmp2d(:,1)))
+
+    ! temp AI
+    do i = 1, grid_nz
+       tmpij = grd(i+grid_var_t-1,:)
+       call g3dv_mpi_ij2grd_real(tmpij, tmp3d(:,:,i))
+    end do
+    if(isroot) call check(nf90_put_var(ncid, v_ai_t, tmp3d))
+
+    ! salt AI
+    do i = 1, grid_nz
+       tmpij = grd(i+grid_var_s-1,:)              
+       call g3dv_mpi_ij2grd_real(tmpij, tmp3d(:,:,i))
+    end do
+    if(isroot) call check(nf90_put_var(ncid, v_ai_s, tmp3d))
+
+    ! other optional diagnostics
+
+    !vt localization distance
+    do i = 1, grid_nz
+       tmpij = bgcov_local_vtloc(i,:)
+       call g3dv_mpi_ij2grd_real(tmpij, tmp3d(:,:,i))
+    end do
+    if(isroot) call check(nf90_put_var(ncid, v_vtloc, tmp3d))
+
+    ! all done, cleanup
+    if(isroot) then
+       call check(nf90_close(ncid))
+    end if
+    deallocate(tmp2d)
+    deallocate(tmp3d)
+  end subroutine write_output
 
 
   !================================================================================
@@ -161,5 +274,16 @@ contains
 
   end subroutine g3dv_final
 
+
+
+  !================================================================================
+  !================================================================================
+  subroutine check(status)
+    integer, intent(in) :: status
+    if(status /= nf90_noerr) then
+       print *, trim(nf90_strerror(status))
+       stop 1
+    end if
+  end subroutine check
 
 end module godas_3dvar

@@ -184,18 +184,18 @@ contains
 
 
 
-  subroutine timer_gather(id, times)
-    integer, intent(in) :: id
-    real,intent(inout) :: times(:)
-    integer(kind=8) :: timer_rate
-    real :: t0
-    integer :: ierr
+  ! subroutine timer_gather(id, times)
+  !   integer, intent(in) :: id
+  !   real,intent(inout) :: times(:)
+  !   integer(kind=8) :: timer_rate
+  !   real :: t0
+  !   integer :: ierr
 
-    !! todo, error checking on valid timer id
-    call system_clock(count_rate=timer_rate)
-    t0 = real(timer_objs(id)%total_ticks) / real(timer_rate)
-    call mpi_allgather(t0, 1, mpi_real, times, 1, mpi_real, mp_comm, ierr)
-  end subroutine timer_gather
+  !   !! todo, error checking on valid timer id
+  !   call system_clock(count_rate=timer_rate)
+  !   t0 = real(timer_objs(id)%total_ticks) / real(timer_rate)
+  !   call mpi_allgather(t0, 1, mpi_real, times, 1, mpi_real, mp_comm, ierr)
+  ! end subroutine timer_gather
 
 
 

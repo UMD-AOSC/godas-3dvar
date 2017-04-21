@@ -135,12 +135,11 @@ contains
 
 
     if(g3dv_mpi_isroot) then
-       print *, ""
-       print *, "------------------------------------------------------------"
-       print *, "g3dv_mpi_setgrid"
-       print *, "------------------------------------------------------------"
-       print *, "MPI setting grid to",nx,ny,nz
-       print *, g3dv_mpi_size
+       print *, new_line('a'),&
+            new_line('a'),"------------------------------------------------------------",&
+            new_line('a'), "g3dv_mpi_setgrid", &
+            new_line('a'), "------------------------------------------------------------"
+       print '(A,I0,A,I0,A,I0)', "  MPI setting grid to ",nx," x ",ny," x ",nz
     end if
 
     grid_nx = nx

@@ -11,6 +11,8 @@ module g3dv_solver
   use g3dv_mpi
   use g3dv_grid
   use g3dv_bgcov
+  use mpi
+
 
   implicit none
   private
@@ -36,16 +38,24 @@ module g3dv_solver
   integer :: timer_cholesky
   integer :: timer_pcg
   integer :: timer_precond
+  integer :: timer_obsearch_HBH  
   integer :: timer_bgcov_HBH
   integer :: timer_pcg_mpi
   integer :: timer_postx
   integer :: timer_bgcov_BH
   integer :: timer_postx_mpi
-
+  integer :: timer_obsearch_BH
+  
   ! variables read in from namelist
   integer :: maxitr = 10
   real    :: conv_ratio = 1e2
 
+
+  type local_obs_block_T
+     real, allocatable :: l(:)
+     logical :: l_valid
+     integer :: idx
+  end type local_obs_block_T
 
 contains
 
@@ -67,7 +77,7 @@ contains
     if(isroot) then
        print *,new_line('a'),&
             new_line('a'), "------------------------------------------------------------",&
-            new_line('a'), "g3dv_solveros_init() : preconditioned congjugate gradient solver",&
+            new_line('a'), "solver_init() : preconditioned congjugate gradient solver",&
             new_line('a'), "------------------------------------------------------------"
     end if
 
@@ -78,15 +88,17 @@ contains
     if (isroot) print g3dv_solver
 
     !setup timer
-    timer           = timer_init('(Solver)', TIMER_SYNC)
-    timer_cholesky  = timer_init('  cholesky decomp')
-    timer_pcg       = timer_init('  PCG')
-    timer_precond   = timer_init('    preconditioner')
-    timer_bgcov_HBH = timer_init('    bgcov (ob/ob)')
-    timer_pcg_mpi   = timer_init('    pcg mpi', TIMER_SYNC)
-    timer_postx     = timer_init('  post multiply', TIMER_SYNC)
-    timer_bgcov_BH  = timer_init('    bgcov (ob/grd)')
-    timer_postx_mpi = timer_init('    postx mpi', TIMER_SYNC)
+    timer              = timer_init('(Solver)', TIMER_SYNC)
+    timer_cholesky     = timer_init('  cholesky decomp',TIMER_SYNC)
+    timer_pcg          = timer_init('  PCG',TIMER_SYNC)
+    timer_precond      = timer_init('    preconditioner')
+    timer_obsearch_HBH = timer_init('    obsearch_HBH')    
+    timer_bgcov_HBH    = timer_init('    bgcov (ob/ob)')
+    timer_pcg_mpi      = timer_init('    pcg mpi', TIMER_SYNC)
+    timer_postx        = timer_init('  post multiply', TIMER_SYNC)
+    timer_obsearch_BH  = timer_init('    obsearch_BH')
+    timer_bgcov_BH     = timer_init('    bgcov (ob/grd)')
+    timer_postx_mpi    = timer_init('    postx mpi', TIMER_SYNC)
 
   end subroutine solver_init
 
@@ -96,12 +108,15 @@ contains
   !================================================================================
 
 
-  subroutine solver_run(ai)
-    real, intent(out), allocatable :: ai(:,:,:)
+  subroutine solver_run(local_ai)
+    !    real, intent(out), allocatable :: ai(:,:,:)
+    real, intent(inout) :: local_ai(grid_ns, g3dv_mpi_ijcount)
+    
 
     integer :: i, j, k, m, n, itr
     integer :: ob1, ob2
     integer :: err, c_error
+    real :: prev_lon, prev_lat
 
     ! main variables needed by the conjugate gradient algorithm
     real :: cg_z(obs_num)
@@ -110,25 +125,17 @@ contains
     real :: cg_q(obs_num)
     real :: cg_s(obs_num)
     real :: cg_beta, cg_alpha, cg_rs, cg_rs_prev
-    
+    real :: cg_q_j
     real :: resid0, resid
 
     ! local segment of observation blocks
-    type local_obs_block_T
-       real, allocatable :: l(:)
-       logical :: l_valid
-       integer :: idx
-    end type local_obs_block_T
     integer :: local_obs_block_num
     type(local_obs_block_T), allocatable :: local_obs_block(:)
-
-    ! local segment of analysis grid
-    real, allocatable :: local_ai(:,:)
 
     ! variables needed by the post multiply step
     integer :: obs_points(obs_num)
     real    :: obs_dist(obs_num)
-    real    :: r, d
+    real    :: r
     integer :: num
     real    :: cov(grid_ns)
 
@@ -137,10 +144,6 @@ contains
     ! determine the number of observation blocks this proc is responsible for,
     ! and initialize the local obs block information
     local_obs_block_num = count(obs_block_proc == g3dv_mpi_rank)
-    call g3dv_mpi_barrier(.true.)
-    print ('(A,I4,A,I6,A)'), "  PROC",g3dv_mpi_rank," responsible for",&
-         local_obs_block_num," observation blocks"
-    call g3dv_mpi_barrier(.true.)
     allocate(local_obs_block(local_obs_block_num))
     n = 1
     do i = 1, size(obs_block_proc)
@@ -174,11 +177,11 @@ contains
           do k = 1, j
              ob2 = obs_block_start(local_obs_block(i)%idx) + k -1
              m = j + (k-1)*(2*n-k)/2
-             local_obs_block(i)%l(m) = bgcov_HBH(obs(ob1), obs(ob2))
-
-             if (j == k) then
-                local_obs_block(i)%l(m) = 1.0
-                local_obs_block(i)%l(m) = local_obs_block(i)%l(m) + obs(ob1)%err**2
+             
+             if(ob1 == ob2)  then
+                local_obs_block(i)%l(m) = 1.0 + obs(ob1)%err**2                
+             else
+                local_obs_block(i)%l(m) = bgcov_HBH(obs(ob1), obs(ob2))
              end if
           end do
        end do
@@ -190,8 +193,17 @@ contains
           local_obs_block(i)%l_valid = .false.
           c_error = c_error + 1
           print *, "ERROR in cholesky decomposition, (likely not positive definite matrix):",err
+          n = obs_block_size(local_obs_block(i)%idx)
+          do j = 1, n
+             ob1  = obs_block_start(local_obs_block(i)%idx) + j -1
+             print *, j, obs(ob1)%id, obs(ob1)%lat, obs(ob1)%lon, obs(ob1)%dpth, obs(ob1)%grd_w%y(1), obs(ob1)%grd_vtloc
+          end do
+          stop 1
+          
        end if
     end do
+    call timer_stop(timer_cholesky)
+    
     c_error = g3dv_mpi_bcstflag(c_error)
     if(isroot .and. c_error > 0) then
        print *, ""
@@ -202,7 +214,8 @@ contains
             "thinning, error values too low, etc.)"
        print *, ""
     end if
-    call timer_stop(timer_cholesky)
+
+
 
 
     ! ------------------------------------------------------------
@@ -218,10 +231,8 @@ contains
        cg_r(i) = obs(i)%inc
     end do
 
-
     ! call the preconditioner
-    ! TODO, implement this
-    cg_s = cg_r
+    call precondition(local_obs_block, cg_r, cg_s)
 
     ! compute r^T * r
     cg_rs = dot_product(cg_r, cg_s)
@@ -240,35 +251,58 @@ contains
           cg_p = cg_s + cg_beta*cg_p
        end if
 
+
        ! apply bg cov between each point
        ! ------------------------------
-       call timer_start(timer_bgcov_HBH)
        cg_q = 0
-       do i =1, size(local_obs_block)
-          do j = obs_block_start(local_obs_block(i)%idx), obs_block_end(local_obs_block(i)%idx)
-             cg_q(j) = cg_p(j)*obs(j)%err**2
+       prev_lat = 1e30
+       prev_lon = 1e30
+       do i = 1, size(obs_local_idx)
+          j = obs_local_idx(i)
 
-             ! TODO, get proper localization distance
-             r = 3000e5
+          if(prev_lat /= obs(j)%lat .or. prev_lon /= obs(j)%lon) then
+             !TODO, ensure profile obs are kept together, in order to
+             ! accelerate this segment
+             ! find nearby points
+             call timer_start(timer_obsearch_HBH)
+             r = bgcov_hzdist(obs(j)%lat) * 2.0/sqrt(0.3)
              call obs_search(obs(j)%lat, obs(j)%lon, r,&
                   obs_points, obs_dist, num)
-             do k = 1, num
-                cg_q(j) = cg_q(j) + &
-                     cg_p(obs_points(k))*bgcov_HBH(obs(j), obs(obs_points(k)), obs_dist(j))
-             end do
+             call timer_stop(timer_obsearch_HBH)
+             prev_lon = obs(j)%lon
+             prev_lat = obs(j)%lat
+          end if
+          
+          ! calculate the covariance with the surrounding points
+          !------------------------------
+          call timer_start(timer_bgcov_HBH)
+
+          ! variance
+          cg_q_j = cg_p(j)*obs(j)%err**2
+
+          ! correlation
+          do k = 1, num                
+             cg_q_j = cg_q_j + cg_p(obs_points(k)) * &
+                  bgcov_HBH(obs(j), obs(obs_points(k)), obs_dist(k))
           end do
+          call timer_stop(timer_bgcov_HBH)
+          cg_q(j) = cg_q_j
        end do
-       call timer_stop(timer_bgcov_HBH)
+
+
 
        ! mpi broadcast of cg_q
-       ! TODO, only share segments this process edited
+       ! TODO, move this to g3dv_mpi module
+       ! TODO, do this more efficiently
+       call timer_start(timer_pcg_mpi)
+       call mpi_allreduce(mpi_in_place, cg_q, size(cg_q), mpi_real, mpi_sum, g3dv_mpi_comm, i)
+       call timer_stop(timer_pcg_mpi)
 
-       !
+       ! calculate other things
        cg_alpha = cg_rs / dot_product(cg_p, cg_q)
        cg_z = cg_z + cg_alpha * cg_p
        cg_r = cg_r - cg_alpha * cg_q
-       !TODO, call the preconditioner
-       cg_s = cg_r
+       call precondition(local_obs_block, cg_r, cg_s)
        cg_rs_prev = cg_rs
        cg_rs = dot_product(cg_r, cg_s)
        resid = sqrt(dot_product(cg_r, cg_r))
@@ -291,44 +325,46 @@ contains
     call timer_start(timer_postx)
 
     ! initialize the local grid analysis increments to 0
-    allocate(local_ai(g3dv_mpi_ijcount, grid_ns))
     local_ai = 0
 
+    
     ! for each gridpoint this proc is to handle...
     do i = 1, g3dv_mpi_ijcount
+
+       if (grid_local_mask(i) <= 0) cycle
+
        ! find all nearby observations 
        ! TODO use actual localization values
-       r = 500e3
+       call timer_start(timer_obsearch_BH)       
+       r = bgcov_hzdist(grid_local_lat(i)) * 2.0/sqrt(0.3)
        call obs_search(grid_local_lat(i), grid_local_lon(i), r, &
             obs_points, obs_dist, num)
+       call timer_stop(timer_obsearch_BH)
 
+
+       
        ! for each observation found...
+       cov = 0
+       call timer_start(timer_bgcov_BH)       
        do j = 1, num
           k = obs_points(j)
 
           ! calculate the covariance between the observation and each variable / 
           ! level of the grid column
-          call timer_start(timer_bgcov_BH)
-          cov = bgcov_BH(obs(k), obs_dist(j), i)
-          call timer_stop(timer_bgcov_BH)
+          cov = cov + cg_z(k)*bgcov_BH(obs(k), obs_dist(j), i)
+          where (abs(cov) > 0.01) grid_local_diag3d_2(:,i) = grid_local_diag3d_2(:,i)+1
 
-          ! TODO, more efficient to swap array order?
-          ! apply observation effect on grid
-          local_ai(i,:) = local_ai(i,:) + cg_z(k) * cov
        end do
+       call timer_stop(timer_bgcov_BH)       
+       ! apply observation effect on grid       
+       local_ai(:,i) = cov
+
     end do
 
+    call timer_stop(timer_postx)
 
-    ! MPI gather of analysis increment
-    call timer_start(timer_postx_mpi)
-    local_ai = g3dv_mpi_rank
-    if(isroot) allocate(ai(grid_nx, grid_ny, grid_ns))
-    do i = 1, grid_ns
-       call g3dv_mpi_ij2grd_real(local_ai(:,i), ai(:,:,i))
-    end do
-    call timer_stop(timer_postx_mpi)
-
-
+    
+    !------------------------------
     if(isroot) then
        print *, ""
        print *, "**** Sover finished ****"
@@ -337,5 +373,52 @@ contains
 
     call timer_stop(timer)
   end subroutine solver_run
+
+
+  !================================================================================
+  !================================================================================
+
+
+  
+  subroutine precondition(blocks, r,s)
+    real, intent(in)  :: r(:)
+    real, intent(out) :: s(:)
+    type(local_obs_block_T), intent(in) :: blocks(:)
+
+    integer :: i, err, vs, ve
+
+    call timer_start(timer_precond)
+    s = 0
+    do i = 1, size(blocks)
+       vs = obs_block_start(blocks(i)%idx)
+       ve = obs_block_end(  blocks(i)%idx)
+       s(vs:ve) = r(vs:ve)          
+       if(blocks(i)%l_valid) then
+          call spptrs('L', obs_block_size(blocks(i)%idx), 1, blocks(i)%L, &
+               s(vs:ve), obs_block_size(blocks(i)%idx), err)
+          if(err/=0)then
+             print *, "ERROR applying preconditioner"
+             stop 1
+          end if
+       end if
+    end do
+
+    ! mpi broadcast of cg_q
+    ! TODO, move this to g3dv_mpi module
+    ! TODO, do this more efficiently
+    call timer_start(timer_pcg_mpi)           
+    call mpi_allreduce(mpi_in_place, s, size(s), mpi_real, mpi_sum, g3dv_mpi_comm, i)
+    call timer_stop(timer_pcg_mpi)
+    
+    call timer_stop(timer_precond)
+
+  end subroutine precondition
+
+
+
+  !================================================================================
+  !================================================================================
+
+
 
 end module  g3dv_solver

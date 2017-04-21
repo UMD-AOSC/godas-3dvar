@@ -20,6 +20,8 @@ else()
   add_definitions(-O3)
 endif()
 
+include_directories("/usr/lib64/gfortran/modules")
+
 # other global variables
 # ------------------------------
 LIST(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/../cmake)

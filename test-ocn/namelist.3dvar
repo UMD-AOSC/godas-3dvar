@@ -10,12 +10,17 @@
   ! single obs tests
   test_obs = .true.
   test_obs_max  = 20
+
+  obs_id_t = 2210
+  obs_id_s = 2220
 /
+
 
 &single_ob
   ! enabled only if single_ob_tes and single_ob_num
   ! are set in the g3dv_obs section
 /
+
 
 &g3dv_solver
   maxitr = 15
@@ -24,7 +29,7 @@
 
 
 &g3dv_bgcov
-  hz_cor = 700e3, 200e3
-  ssh_grad_tensor = 0.2
+  hz_cor = 500e3, 100e3
+  surf_grad_tensor = 0.2
   time_sigma = 120.0
 /

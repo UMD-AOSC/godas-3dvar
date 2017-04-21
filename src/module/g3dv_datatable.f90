@@ -65,6 +65,8 @@ contains
     call check(nf90_inq_varid(ncid, trim(v%file_var), vid))
     call check(nf90_get_var(ncid, vid, val))
     call check(nf90_close(ncid))
+
+    if (isroot)   print *,"  range:", minval(val), maxval(val)
   end subroutine datatable_get1d
 
 
@@ -88,6 +90,8 @@ contains
     call check(nf90_inq_varid(ncid, trim(v%file_var), vid))
     call check(nf90_get_var(ncid, vid, val))
     call check(nf90_close(ncid))
+
+    if (isroot)   print *,"  range:", minval(val), maxval(val)    
   end subroutine datatable_get2d
 
 
@@ -111,6 +115,8 @@ contains
     call check(nf90_inq_varid(ncid, trim(v%file_var), vid))
     call check(nf90_get_var(ncid, vid, val))
     call check(nf90_close(ncid))
+
+    if (isroot)   print *,"  range:", minval(val), maxval(val)    
   end subroutine datatable_get3d
 
 

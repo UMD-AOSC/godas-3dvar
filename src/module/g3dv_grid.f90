@@ -1,4 +1,5 @@
 module g3dv_grid
+  
   !! author: Travis Sluka
   !!
   !! g3dv_grid description
@@ -9,8 +10,8 @@ module g3dv_grid
   use timing
   use g3dv_datatable, only : datatable_get
   use g3dv_mpi
-  use netcdf
 
+  use mpi
 
   implicit none
   private
@@ -19,12 +20,26 @@ module g3dv_grid
   ! public module methods
   !------------------------------------------------------------
   public :: grid_init
-  public :: grid_scatter
-  public :: grid_write
+
+  public :: grid_genweights
+  public :: grid_interp2d
+  public :: grid_interp3d
+
+  public :: grid_interpweights
+  type grid_interpweights
+     integer :: x(4)
+     integer :: y(4)
+     integer :: z(2)
+     real    :: w_h(4)
+     real    :: w_v
+  end type grid_interpweights
+
 
 
   ! public module variables
   !------------------------------------------------------------
+  integer, public, protected :: grid_mpi_interpweights
+
   integer, public, protected :: grid_nx
   integer, public, protected :: grid_ny
   integer, public, protected :: grid_nz
@@ -33,24 +48,22 @@ module g3dv_grid
 
   integer, public, protected :: grid_var_t
   integer, public, protected :: grid_var_s
-  integer, public, protected :: grid_var_u
-  integer, public, protected :: grid_var_v
-  integer, public, protected :: grid_var_ssh
+!  integer, public, protected :: grid_var_u
+!  integer, public, protected :: grid_var_v
+!  integer, public, protected :: grid_var_ssh
 
-  ! these are only valid on the root proc
-  real, public, protected, allocatable :: grid_lat(:,:)
-  real, public, protected, allocatable :: grid_lon(:,:)
   real, public, protected, allocatable :: grid_dpth(:)
-  real, public, protected, allocatable :: grid_lvls(:,:)
-  real, public, protected, allocatable :: grid_ssh(:,:)
-  real, public, protected, allocatable :: grid_dens(:,:,:)
 
   ! the scattered grid parameters
   real, public, protected, allocatable :: grid_local_lat(:) 
   real, public, protected, allocatable :: grid_local_lon(:)
-  real, public, protected, allocatable :: grid_local_lvls(:)
+  real, public, protected, allocatable :: grid_local_mask(:)
   real, public, protected, allocatable :: grid_local_ssh(:) 
   real, public, protected, allocatable :: grid_local_dens(:,:)
+  real, public, protected, allocatable :: grid_local_D(:)
+
+  real, public, allocatable :: grid_local_diag3D_2(:,:)
+
 
 
   ! private module variables
@@ -71,17 +84,58 @@ contains
   !================================================================================
 
 
+  pure function grid_interp2d(grd, w) result(v)
+    real, intent(in) :: grd(:,:)
+    type(grid_interpweights), intent(in) :: w
+    real :: v
+    integer :: i
+    v = 0.0
+    do i = 1, 1
+       if (w%w_h(i) == 0) cycle
+       v = v + grd(w%x(i), w%y(i)) * w%w_h(i)
+    end do
+  end function grid_interp2d
+
+
+  
+  !================================================================================
+  !================================================================================
+
+
+  pure function grid_interp3d(grd, w) result(v)
+    real, intent(in) :: grd(:,:,:)
+    type(grid_interpweights), intent(in) :: w
+    real :: v
+
+    integer :: i
+    v = 0.0
+    do i = 1, 1
+       if (w%w_h(i) == 0) cycle
+       v = v + grd(w%x(i), w%y(i), w%z(i)) * w%w_h(i)
+    end do
+
+    !TODO, this doesn't do z properly
+  end function grid_interp3d
+
+
+  !================================================================================
+  !================================================================================
+
+
 
   subroutine grid_init(isroot0, nml)
     logical, intent(in) :: isroot0
     character(len=*), intent(in) :: nml
 
     real, allocatable :: tree_lons(:), tree_lats(:)
-
-    integer :: x, y
+    integer :: x, y, i
     integer :: unit
     integer :: timer
 
+    real, allocatable :: tmp2d(:,:)
+    real, allocatable :: tmp3d(:,:,:)
+    real, allocatable :: tmpij(:)
+    
     namelist /g3dv_grid/ grid_nx, grid_ny, grid_nz
     
 
@@ -107,50 +161,101 @@ contains
        print *,""
     end if
 
+    ! initialize mpi types
+    call g3dv_mpi_setgrid(grid_nx, grid_ny, grid_nz)
+    call grid_mpi_init()
+    
 
     ! TODO, 
-    grid_ns = grid_nz * 4 + 1
+    grid_ns = grid_nz * 2! + 1
     grid_var_t = 1
     grid_var_s = grid_nz + grid_var_t
-    grid_var_u = grid_nz + grid_var_u
-    grid_var_v = grid_nz + grid_var_v
-    grid_var_ssh = grid_var_v + 1
+!    grid_var_u = grid_nz + grid_var_s
+!    grid_var_v = grid_nz + grid_var_u
+!    grid_var_ssh = grid_nz +  grid_var_v
 
 
-    ! some things to be done only on the root node
+
     !------------------------------------------------------------
+    ! read in the grid specifications
+    !------------------------------------------------------------
+    allocate(grid_dpth(grid_nz))
+    allocate(grid_local_lat(g3dv_mpi_ijcount))
+    allocate(grid_local_lon(g3dv_mpi_ijcount))
+    allocate(grid_local_mask(g3dv_mpi_ijcount))
+    allocate(grid_local_D(g3dv_mpi_ijcount))
+    allocate(grid_local_ssh(g3dv_mpi_ijcount))
+    allocate(grid_local_dens(grid_nz, g3dv_mpi_ijcount))
+    allocate(grid_local_diag3d_2(grid_ns, g3dv_mpi_ijcount))
+    allocate(tmpij(g3dv_mpi_ijcount))
     if(isroot) then
-       ! read in the grid specifications
-       print *, "Reading grid definition parameters..."
-       allocate(grid_lat(grid_nx, grid_ny))
-       call datatable_get('grid_y', grid_lat)
-       allocate(grid_lon(grid_nx, grid_ny))
-       call datatable_get('grid_x', grid_lon)
-       allocate(grid_dpth(grid_nz))
-       call datatable_get('grid_z', grid_dpth)
-       allocate(grid_lvls(grid_nx, grid_ny))
-       call datatable_get('grid_lvls', grid_lvls)
-
-       print *, ""
-       print '(A,I0,A,I0,A,I0)', " Grid size is ",grid_nx," x ",grid_ny," x ",grid_nz
-       print *, " lat  range: ",minval(grid_lat),maxval(grid_lat)
-       print *, " lon  range: ",minval(grid_lon),maxval(grid_lon)
-       print *, "depth range: ",minval(grid_dpth),maxval(grid_dpth)
-       
-       ! make sure longitude is 0 to 360
-!       where (grid_lon < 0) grid_lon = grid_lon + 360
-
-       ! generate kd-tree for fast lookup of grid points given a lat/lon
-       print *,""
-       print *, "Generating kd-tree for fast lookup of grid x/y given lat/lon..."
+       allocate(tmp2d(grid_nx, grid_ny))
+       allocate(tmp3d(grid_nx, grid_ny, grid_nz))       
        allocate(tree_lons(grid_nx*grid_ny))
        allocate(tree_lats(grid_nx*grid_ny))
+
+       print *, ""
+       print *, "Reading grid definition parameters..."
+
+       print '(A,I0,A,I0,A,I0)', "  Grid size is ",grid_nx," x ",grid_ny," x ",grid_nz
+    else
+       !TODO, get rid of this
+       allocate(tmp2d(1,1))
+       allocate(tmp3d(1,1,1))
+    end if
+    
+    
+    ! depth
+    if(isroot) then
+       call datatable_get('grid_z', grid_dpth)
+       call datatable_get('grid_D', tmp2d)
+    end if
+    call g3dv_mpi_grd2ij_real(tmp2d, grid_local_D)
+    call mpi_bcast(grid_dpth, size(grid_dpth), mpi_real, g3dv_mpi_root, g3dv_mpi_comm, i)
+
+    
+    ! latitude
+    if(isroot) then
+       call datatable_get('grid_y', tmp2d)       
+       do x = 1, grid_nx
+          do y = 1, grid_ny
+             tree_lats((y-1)*grid_nx + x) = tmp2d(x,y)
+          end do
+       end do
+    end if
+    call g3dv_mpi_grd2ij_real(tmp2d, grid_local_lat)
+
+    
+    ! longitude
+    if(isroot) then
+       call datatable_get('grid_x', tmp2d)
+       do x = 1, grid_nx
+          do y = 1, grid_ny
+             tree_lons((y-1)*grid_nx + x) = tmp2d(x,y)
+          end do
+       end do
+    end if
+    call g3dv_mpi_grd2ij_real(tmp2d, grid_local_lon)
+
+    
+    ! mask
+    if(isroot) then
+       call datatable_get('grid_mask', tmp2d)
+       print '(A,I0,A,I0,A,F5.1,A)', "  ocean points: ", nint(sum(tmp2d))," of ", &
+            grid_nx*grid_ny, " (",sum(tmp2d)/grid_nx/grid_ny*100,"%)"
+    end if
+    call g3dv_mpi_grd2ij_real(tmp2d, grid_local_mask)
+
+       
+    ! generate kd-tree for fast lookup of grid points given a lat/lon
+    !------------------------------
+    if(isroot) then
+       print *,""
+       print *, "Generating kd-tree for fast lookup of grid x/y given lat/lon..."
        allocate(ll_kdtree_x(grid_nx*grid_ny))
        allocate(ll_kdtree_y(grid_nx*grid_ny))
        do x = 1, grid_nx
           do y = 1, grid_ny
-          tree_lons((y-1)*grid_nx + x) = grid_lon(x,y)
-          tree_lats((y-1)*grid_nx + x) = grid_lat(x,y)
           ll_kdtree_x((y-1)*grid_nx + x) = x
           ll_kdtree_y((y-1)*grid_nx + x) = y
           end do
@@ -158,23 +263,43 @@ contains
        call kd_init(ll_kdtree, tree_lons, tree_lats)
        deallocate(tree_lons)
        deallocate(tree_lats)
-
-
-       ! read in state fields
-       print *, ""
-       print *, "Reading background fields..."
-       allocate(grid_ssh(grid_nx, grid_ny))
-       call datatable_get('bg_ssh', grid_ssh)
-       allocate(grid_dens(grid_nx, grid_ny, grid_nz))
-       call datatable_get('bg_dens',grid_dens)
-       
-       print *, ""
-       print *, " ssh      range: ",minval(grid_ssh), maxval(grid_ssh)
-       print *, " density  range: ",minval(grid_dens),maxval(grid_dens)
     end if
 
+    
+    ! read in state fields
+    ! TODO, scatter density and MLD instantly (they are only needed for
+    ! the vertical scale calculations)
+    !------------------------------
+    if(isroot) then
+       print *, ""
+       print *, "Reading background fields..."
+    end if
+
+    
+    ! ssh
+    if(isroot) then
+       call datatable_get('bg_ssh', tmp2d)
+    end if
+    call g3dv_mpi_grd2ij_real(tmp2d, grid_local_ssh)
+
+    
+    ! density
+    ! TODO, save on memory by reading in a 2d slice at a time and
+    ! scattering immediately?
+    if(isroot) then
+       call datatable_get('bg_dens',tmp3d)
+    end if
+    do i = 1, grid_nz
+       call g3dv_mpi_grd2ij_real(tmp3d(:,:,i), tmpij)
+       grid_local_dens(i,:) = tmpij
+    end do
 
 
+    ! done, cleanup
+    !------------------------------------------------------------
+    deallocate(tmp2d)
+    deallocate(tmp3d)
+    deallocate(tmpij)
     call timer_stop(timer)
   end subroutine grid_init
 
@@ -185,104 +310,85 @@ contains
   !================================================================================
 
 
-  
-  subroutine grid_scatter()
-    integer :: i
 
-    if(isroot) then
-       print *,new_line('a'),&
-            new_line('a'), '------------------------------------------------------------',&
-            new_line('a'), 'grid_scatter() : ',&
-            new_line('a'), '------------------------------------------------------------'
-    end if
+  pure function grid_genweights(lat, lon, depth) result(w)
+    real, intent(in) :: lat, lon, depth
+    type(grid_interpweights) :: w
 
-    if (isroot) print *, "scattering LAT ..."
-    allocate(grid_local_lat(g3dv_mpi_ijcount))
-    call g3dv_mpi_grd2ij_real(grid_lat, grid_local_lat)
+
+    integer :: z
+    real    :: zdist, zdist2
+    integer :: rpoints(1), rnum
+    real    :: rdist(1)
+
+    ! this currently only generates the closest grid points, not full linear interpolation
+    ! TODO, do proper linear interpolation of all nearby ocean points
     
-    if (isroot) print *, "scattering LON ..."
-    allocate(grid_local_lon(g3dv_mpi_ijcount))
-    call g3dv_mpi_grd2ij_real(grid_lon, grid_local_lon)
+    ! get x/y points
+    call kd_search_nnearest(ll_kdtree, lon, lat, 1, rpoints, rdist, rnum, .false.)
+    w%x   = 0
+    w%y   = 0
+    w%w_h = 0
+    w%x(1) = ll_kdtree_x(rpoints(1))
+    w%y(1) = ll_kdtree_y(rpoints(1))
+    w%w_h(1) = 1.0
 
-    if (isroot) print *, "scattering LVLS ..."
-    allocate(grid_local_lvls(g3dv_mpi_ijcount))
-    call g3dv_mpi_grd2ij_real(grid_lvls, grid_local_lvls)
+    ! ! if the closest point is on land, abort
+    ! ! TODO, find the closest OCEAN point
+    ! if(grid_mask(w%x(1), w%y(1)) < 1) then
+    !    w%x(1) = -1
+    !    return
+    ! end if
 
-    if (isroot) print *, "scattering SSH ..."
-    allocate(grid_local_ssh(g3dv_mpi_ijcount))
-    call g3dv_mpi_grd2ij_real(grid_ssh, grid_local_ssh)
-    if (isroot) deallocate(grid_ssh)
-
-    if (isroot) print *, "scattering DENS ..."
-    allocate(grid_local_dens(grid_nz, g3dv_mpi_ijcount))
-    do i = 1, grid_nz
-       call g3dv_mpi_grd2ij_real(grid_dens(:,:,i), grid_local_dens(i,:))
+    ! get z interp
+    ! find closest z level    
+    zdist = 1e10
+    do z = 1, grid_nz
+       zdist2 = abs(depth - grid_dpth(z))
+       if(zdist2 > zdist) exit
+       zdist = zdist2
     end do
-    if (isroot) deallocate(grid_dens)
+    z = z - 1
+    w%z = z
+    w%w_v = 0
 
-  end subroutine grid_scatter
-
-
+  end function grid_genweights
 
 
 
   !================================================================================
   !================================================================================
 
-  subroutine grid_write(grd, filename)
-    real, intent(in) :: grd(grid_nx, grid_ny, grid_ns)
-    character(len=*), intent(in) :: filename
-
-    integer :: ncid, vid
-    integer :: d_x, d_y, d_z
-    integer :: v_x, v_y, v_z
-    integer :: v_t, v_s, v_u, v_v, v_ssh 
 
 
-    print *, "Saving analysis grid to",trim(filename)
+  subroutine grid_mpi_init()
+    integer, parameter :: n = 5
+    integer :: blocklen(n)
+    integer :: type(n)
+    integer(kind=mpi_address_kind) :: disp(n), base
+    type(grid_interpweights) :: grd
+    integer :: ierr, i
 
-    ! setup the output file
-    call check(nf90_create(filename, NF90_WRITE, ncid))
+    call mpi_get_address(grd%x,     disp(1), ierr)
+    call mpi_get_address(grd%y,     disp(2), ierr)
+    call mpi_get_address(grd%z,     disp(3), ierr)
+    call mpi_get_address(grd%w_h,   disp(4), ierr)
+    call mpi_get_address(grd%w_v,   disp(5), ierr)
+    base = disp(1)
+    do i =1,n
+       disp(i) = disp(i) - base
+    end do
 
-    call check(nf90_def_dim(ncid, "grid_x", grid_nx, d_x))
-    call check(nf90_def_var(ncid, "grid_x", nf90_real, (/d_x/), v_x))
+    blocklen = 4
+    blocklen(3) = 2
+    blocklen(5) = 1
 
-    call check(nf90_def_dim(ncid, "grid_y", grid_ny, d_y))
-    call check(nf90_def_var(ncid, "grid_y", nf90_real, (/d_y/), v_y))
-
-    call check(nf90_def_dim(ncid, "grid_z", grid_nz, d_z))
-    call check(nf90_def_var(ncid, "grid_z", nf90_real, (/d_z/), v_z))
-
-    call check(nf90_def_var(ncid, "t", nf90_real, (/d_x, d_y, d_z/), v_t))
-    call check(nf90_def_var(ncid, "s", nf90_real, (/d_x, d_y, d_z/), v_s))
-    call check(nf90_def_var(ncid, "u", nf90_real, (/d_x, d_y, d_z/), v_u))
-    call check(nf90_def_var(ncid, "v", nf90_real, (/d_x, d_y, d_z/), v_v))
-    call check(nf90_def_var(ncid, "ssh", nf90_real, (/d_x, d_y/), v_ssh))
-
-    call check(nf90_enddef(ncid))
-
-    ! write out data
-    call check(nf90_put_var(ncid, v_x, grid_lon(:,1)))
-    call check(nf90_put_var(ncid, v_y, grid_lat(1,:)))
-    call check(nf90_put_var(ncid, v_t, grd(:,:,grid_var_t:grid_var_t+grid_nz-1)))
-    call check(nf90_put_var(ncid, v_s, grd(:,:,grid_var_s:grid_var_s+grid_nz-1)))
-    call check(nf90_put_var(ncid, v_u, grd(:,:,grid_var_u:grid_var_u+grid_nz-1)))
-    call check(nf90_put_var(ncid, v_v, grd(:,:,grid_var_v:grid_var_v+grid_nz-1)))
-    call check(nf90_put_var(ncid, v_ssh, grd(:,:,grid_var_ssh)))
+    type(1:3) = mpi_integer
+    type(4:5)   = mpi_real
+    call mpi_type_create_struct(n, blocklen, disp, type, grid_mpi_interpweights, ierr)
+    call mpi_type_commit(grid_mpi_interpweights, ierr)
+  end subroutine grid_mpi_init
 
 
-    call check(nf90_close(ncid))
-    
-    
-  end subroutine grid_write
-
-
-  subroutine check(status)
-    integer, intent(in) :: status
-    if(status /= nf90_noerr) then
-       print *, trim(nf90_strerror(status))
-       stop 1
-    end if
-  end subroutine check
 
 end module  g3dv_grid

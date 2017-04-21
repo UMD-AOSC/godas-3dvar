@@ -128,7 +128,7 @@ contains
 
 
 
-  subroutine swap(a, b, i, j)
+  pure subroutine swap(a, b, i, j)
     !! Convenience function to swap two elements in two arrays.
     integer, intent(inout) :: a(:), b(:)
     integer, intent(in)    :: i, j
