@@ -17,7 +17,7 @@ set(3DVAR_LIB ${3DVAR_LIB_STATIC})
 
 # build target
 # ------------------------------------------------------------
-file( GLOB SRCS "*.f90")
+file( GLOB SRCS "*.[f,F]90")
 add_executable(${EXE} ${SRCS})
 target_link_libraries(${EXE} ${NETCDF_LIBRARIES_F77})
 target_link_libraries(${EXE} ${3DVAR_LIB})

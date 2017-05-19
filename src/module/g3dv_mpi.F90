@@ -8,7 +8,9 @@ module g3dv_mpi
 
   use mpi
   use iso_fortran_env
-
+#ifdef __INTEL_COMPILER
+  use ifport
+#endif
 
   implicit none
   private
@@ -353,11 +355,12 @@ contains
     integer :: ierr
     logical, optional :: syncio
 
+    integer :: i
     call mpi_barrier(g3dv_mpi_comm, ierr)
     
     if(present(syncio) .and. syncio) then
        flush(output_unit)
-       call system('usleep 1')
+       i = system('usleep 1')
        call mpi_barrier(g3dv_mpi_comm, ierr)
     end if
 

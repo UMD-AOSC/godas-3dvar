@@ -20,7 +20,6 @@ else()
   add_definitions(-O3)
 endif()
 
-include_directories("/usr/lib64/gfortran/modules")
 
 # other global variables
 # ------------------------------
@@ -33,10 +32,11 @@ set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/mod)
 
 # required packages
 # ------------------------------------------------------------
-set(NETCDF_F77 "YES")
-find_package(NetCDF REQUIRED)
-find_package(LAPACK REQUIRED)
+find_package(LAPACK)
 find_package(MPI REQUIRED)
+
+set(NETCDF_INCLUDES $ENV{NETCDF_INCS})
+set(NETCDF_LIBRARIES_F77 $ENV{NETCDF_LIBS})
 
 
 # subprojects
