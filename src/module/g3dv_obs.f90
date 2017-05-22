@@ -49,6 +49,8 @@ module g3dv_obs
      real    :: grd_ssh
      real    :: grd_var
      real    :: grd_vtloc
+     real    :: grd_coast
+     real    :: grd_ocndpth
   end type observation
 
   
@@ -322,7 +324,7 @@ contains
     
     !interpolate certain fields to the observation locations
     !------------------------------------------------------------
-    allocate(tmpij(grid_nz))
+    allocate(tmpij(g3dv_mpi_ijcount))
     if (isroot) then
        allocate(tmp2d(grid_nx, grid_ny))
        allocate(tmp3d(grid_nx, grid_ny, grid_nz))
@@ -355,7 +357,24 @@ contains
        end do
     end if
 
-    
+    ! coastline tensor
+    call g3dv_mpi_ij2grd_real(grid_local_coastdist, tmp2d)
+    if (isroot) then
+       do i = 1, obs_num
+          obs(i)%grd_coast = grid_interp2d(tmp2d, obs(i)%grd_w)
+       end do
+    end if 
+   
+
+    ! ocean depth at obs loc
+    call g3dv_mpi_ij2grd_real(grid_local_D, tmp2d)
+    if (isroot) then
+       do i = 1, obs_num
+          obs(i)%grd_ocndpth = grid_interp2d(tmp2d, obs(i)%grd_w)
+       end do
+    end if 
+
+
     ! background variance
     ! TODO, do this correctly from the 3D field
     if(isroot) then
@@ -691,7 +710,7 @@ contains
   
   subroutine obs_mpi_init()
     !! define a derived type to MPI
-    integer, parameter :: n = 11
+    integer, parameter :: n = 13
     integer :: blocklen(n)
     integer :: type(n)
     integer(kind=mpi_address_kind) :: disp(n), base
@@ -709,7 +728,8 @@ contains
     call mpi_get_address(ob%grd_ssh,   disp( 9), ierr)    
     call mpi_get_address(ob%grd_var,   disp(10), ierr)
     call mpi_get_address(ob%grd_vtloc, disp(11), ierr)
-    
+    call mpi_get_address(ob%grd_coast, disp(12), ierr)
+    call mpi_get_address(ob%grd_ocndpth,disp(13), ierr)
     base = disp(1)
     do i=1,n
        disp(i) = disp(i) - base
@@ -720,7 +740,7 @@ contains
     type(1)     = mpi_integer
     type(2:7)   = mpi_real
     type(8)     = grid_mpi_interpweights
-    type(9:11)  = mpi_real
+    type(9:13)  = mpi_real
     
     call mpi_type_create_struct(n, blocklen, disp, type, obs_mpi_observation, ierr)
     call mpi_type_commit(obs_mpi_observation, ierr)

@@ -41,7 +41,10 @@ module g3dv_bgcov
   real :: vt_loc_min = -1
   real :: vt_loc_pow = 1
   real :: time_loc = -1
-  real :: surf_grad_tensor = -1.0
+  real :: tnsr_surf  = -1.0   ! surface (SSH) gradient tensor
+  real :: tnsr_coast_dist = -1.0       ! coast gradient tensor
+  real :: tnsr_coast_min  = 0.0
+  real :: tnsr_depth = -1.0
   real :: bgvar_t = 1.0
   real :: bgvar_s = 0.1
   
@@ -72,7 +75,7 @@ contains
     
 
     namelist /g3dv_bgcov/ hz_loc, vt_loc, vt_loc_min, vt_loc_max, vt_loc_pow,&
-         time_loc, surf_grad_tensor, bgvar_t, bgvar_s
+         time_loc, tnsr_surf, tnsr_coast_dist, tnsr_coast_min, tnsr_depth, bgvar_t, bgvar_s
 
 
     if(isroot) then
@@ -191,7 +194,7 @@ contains
     
     ! for shallow/stable layers that have no localization lengths set at all:
     if(loc_d(1) < 0 .or. loc_u(size(dens)) < 0) then
-       loc_d(1) = dpth(size(dens))
+       loc_d(1) = dpth(size(dens))*sqrt(0.3)/2.0
        loc_u(1) = loc_d(1)
        loc_u(size(dens)) = dpth(size(dens))*sqrt(0.3)/2.0
        loc_d(size(dens)) = loc_u(size(dens))
@@ -276,7 +279,7 @@ contains
     real :: cov
 
     real :: dist0, r
-    real :: hz_cor, vt_cor, time_cor, tensor
+    real :: hz_cor, vt_cor, time_cor, surf_tensor, coast_tensor
 
     cov = 0.0
     
@@ -298,20 +301,37 @@ contains
        dist0 = re*acos(r)
     end if
 
-    vt_cor = loc(abs(ob1%dpth-ob2%dpth),  sqrt(ob1%grd_vtloc*ob2%grd_vtloc))
+
+    ! vertical localization distance is the average of vt_loc of the two points 
+    ! BUT, this is also modulated by a function of the difference of the two vt_locs.
+    ! It makes the algorithm stable... trust me
+    vt_cor = loc(abs(ob1%dpth-ob2%dpth),  (ob1%grd_vtloc+ob2%grd_vtloc)/2.0)
+    vt_cor = vt_cor *&
+         loc(abs(ob1%grd_vtloc-ob2%grd_vtloc), (ob1%grd_vtloc+ob2%grd_vtloc)/2.0)
     if(vt_cor <= 0) return
     
+    ! horizontal localization
     hz_cor = loc(dist0, (bgcov_hzdist(ob1%lat)+ bgcov_hzdist(ob2%lat))/2.0)
+
+    ! temporal localization
     time_cor = merge( &
                 loc(abs(ob1%hr - ob2%hr), time_loc),&
-                1.0,&
-                time_loc > 0.0)
-    tensor   = merge( &
-                loc(abs(ob1%grd_ssh - ob2%grd_ssh), surf_grad_tensor),&
-                1.0, &
-                surf_grad_tensor > 0.0)
+                1.0, time_loc > 0.0)
 
-    cov = hz_cor*vt_cor*time_cor*tensor*ob1%grd_var*ob2%grd_var    
+    ! gradient tensor localizations
+    surf_tensor   = merge( &
+                loc(abs(ob1%grd_ssh - ob2%grd_ssh), tnsr_surf),&
+                1.0, tnsr_surf > 0.0)
+
+    coast_tensor = merge( &
+        max(tnsr_coast_min, &
+           1.0 - abs( min(ob1%grd_coast, tnsr_coast_dist) - &
+                      min(ob2%grd_coast, tnsr_coast_dist))&
+           / tnsr_coast_dist), &
+        1.0, tnsr_coast_dist > 0.0)
+
+    ! add it all up to get the final covariance
+    cov = hz_cor * vt_cor * time_cor * surf_tensor * coast_tensor * ob1%grd_var * ob2%grd_var
 
   end function bgcov_HBH
 
@@ -327,18 +347,22 @@ contains
     integer, intent(in) :: ij
     real :: cov(grid_ns)
 
-    real :: hz_cor, time_cor, tensor, vt_cor(grid_nz)
+    real :: hz_cor, time_cor, surf_tensor, coast_tensor, vt_cor(grid_nz)
 
     integer :: i
     real :: r
 
 
-    ! vertical correlation
-    ! TODO, ensure we're not updating levels that are not ocean
+
+    ! vertical localization distance is the average of vt_loc of the two points 
+    ! BUT, this is also modulated by a function of the difference of the two vt_locs.
+    ! It makes the algorithm stable... trust me
     vt_cor = 0.0    
     do i = 1, grid_nz
        if(bgcov_local_vtloc(i,ij) <= 0.0) exit
-       r = loc(abs(grid_dpth(i)-ob%dpth),  sqrt(ob%grd_vtloc*bgcov_local_vtloc(i,ij)))
+       r = loc(abs(grid_dpth(i)-ob%dpth),  (ob%grd_vtloc+bgcov_local_vtloc(i,ij))/2.0)
+       r = r * loc(abs(ob%grd_vtloc-bgcov_local_vtloc(i,ij)), &
+            (ob%grd_vtloc+bgcov_local_vtloc(i,ij))/2.0)
        vt_cor(i) = r
     end do
        
@@ -350,18 +374,28 @@ contains
        cov(grid_var_s:grid_var_s+grid_nz-1) = vt_cor * bgvar_s !TODO, use 3D variance
     end if
 
-    
+    ! horizontal localization    
     hz_cor = loc(dist, (bgcov_hzdist(grid_local_lat(ij))+ bgcov_hzdist(ob%lat))/2.0)
+
+    ! temporal localization
     time_cor = merge( &
                loc(abs(ob%hr), time_loc),&
-               1.0,&
-               time_loc > 0.0)
-    tensor = merge( &
-               loc(abs(ob%grd_ssh - grid_local_ssh(ij)), surf_grad_tensor),&
-               1.0, &
-               surf_grad_tensor > 0.0)
+               1.0, time_loc > 0.0)
 
-    cov = cov * hz_cor * time_cor*tensor * ob%grd_var
+    ! gradient tensor localizations
+    surf_tensor = merge( &
+               loc(abs(ob%grd_ssh - grid_local_ssh(ij)), tnsr_surf),&
+               1.0, tnsr_surf > 0.0)
+
+    coast_tensor = merge( &
+        max(tnsr_coast_min, &
+           1.0 - abs( min(ob%grd_coast, tnsr_coast_dist) - &
+                      min(grid_local_coastdist(ij), tnsr_coast_dist))&
+           / tnsr_coast_dist), &
+        1.0, tnsr_coast_dist > 0.0)
+
+    ! add it all up
+    cov = cov * hz_cor * time_cor * surf_tensor * coast_tensor * ob%grd_var
 
   end function bgcov_BH
 

@@ -59,6 +59,7 @@ module g3dv_grid
   real, public, protected, allocatable :: grid_local_lon(:)
   real, public, protected, allocatable :: grid_local_mask(:)
   real, public, protected, allocatable :: grid_local_ssh(:) 
+  real, public, protected, allocatable :: grid_local_coastdist(:) 
   real, public, protected, allocatable :: grid_local_dens(:,:)
   real, public, protected, allocatable :: grid_local_D(:)
 
@@ -185,6 +186,7 @@ contains
     allocate(grid_local_mask(g3dv_mpi_ijcount))
     allocate(grid_local_D(g3dv_mpi_ijcount))
     allocate(grid_local_ssh(g3dv_mpi_ijcount))
+    allocate(grid_local_coastdist(g3dv_mpi_ijcount))    
     allocate(grid_local_dens(grid_nz, g3dv_mpi_ijcount))
     allocate(grid_local_diag3d_2(grid_ns, g3dv_mpi_ijcount))
     allocate(tmpij(g3dv_mpi_ijcount))
@@ -246,6 +248,11 @@ contains
     end if
     call g3dv_mpi_grd2ij_real(tmp2d, grid_local_mask)
 
+    !coast distance
+    if(isroot) then
+       call datatable_get('grid_coast', tmp2d)
+    end if
+    call g3dv_mpi_grd2ij_real(tmp2d, grid_local_coastdist)
        
     ! generate kd-tree for fast lookup of grid points given a lat/lon
     !------------------------------
