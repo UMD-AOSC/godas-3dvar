@@ -33,7 +33,8 @@ module g3dv_bgcov
   !------------------------------------------------------------  
   real, parameter :: pi = 4*atan(1.0)
   real, parameter :: re = 6371d3
-
+  real, parameter :: omega = 7.29e-5
+  
   ! variables read in from namelist
   real :: hz_loc(2) = -1
   real :: vt_loc = 0.15
@@ -44,7 +45,6 @@ module g3dv_bgcov
   real :: tnsr_surf  = -1.0   ! surface (SSH) gradient tensor
   real :: tnsr_coast_dist = -1.0       ! coast gradient tensor
   real :: tnsr_coast_min  = 0.0
-  real :: tnsr_depth = -1.0
   real :: bgvar_t = 1.0
   real :: bgvar_s = 0.1
   
@@ -75,7 +75,7 @@ contains
     
 
     namelist /g3dv_bgcov/ hz_loc, vt_loc, vt_loc_min, vt_loc_max, vt_loc_pow,&
-         time_loc, tnsr_surf, tnsr_coast_dist, tnsr_coast_min, tnsr_depth, bgvar_t, bgvar_s
+         time_loc, tnsr_surf, tnsr_coast_dist, tnsr_coast_min, bgvar_t, bgvar_s
 
 
     if(isroot) then
@@ -410,7 +410,15 @@ contains
     real, intent(in) :: lat
     real :: cor
     ! linear interpolation from EQ to Pole
-    cor = hz_loc(2) + (hz_loc(1)-hz_loc(2))*(1.0-(abs(lat)/90.0))
+    !    cor = hz_loc(2) + (hz_loc(1)-hz_loc(2))*(1.0-(abs(lat)/90.0))
+
+    ! more accurate rossby radius calculation
+    if ( abs(lat) < 0.1) then
+       cor = hz_loc(1)
+    else
+       cor = max(hz_loc(2), min(hz_loc(1), &
+            2.6/(2*omega*abs(sin(lat*pi/180.0))) ))
+    end if
   end function bgcov_hzdist
 
 

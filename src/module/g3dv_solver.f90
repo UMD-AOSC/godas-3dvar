@@ -265,7 +265,8 @@ contains
              ! accelerate this segment
              ! find nearby points
              call timer_start(timer_obsearch_HBH)
-             r = bgcov_hzdist(obs(j)%lat) * 2.0/sqrt(0.3)
+             r = bgcov_hzdist(obs(j)%lat)*1.1 * 2.0/sqrt(0.3) ! expanded by 10% to account for point
+              ! with small radius in range of point with larger radius
              call obs_search(obs(j)%lat, obs(j)%lon, r,&
                   obs_points, obs_dist, num)
              call timer_stop(timer_obsearch_HBH)
