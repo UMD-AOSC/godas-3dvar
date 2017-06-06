@@ -50,7 +50,6 @@ module g3dv_obs
      real    :: grd_var
      real    :: grd_vtloc
      real    :: grd_coast
-     real    :: grd_ocndpth
   end type observation
 
   
@@ -316,10 +315,8 @@ contains
 !          end if
        end do          
        print *, (i1-obs_num), " removed for ON LAND"
-
-       print '(A,I0,A)', "  ",obs_num," obs kepts after QC"       
     end if
-
+    
 
     
     !interpolate certain fields to the observation locations
@@ -335,6 +332,23 @@ contains
        allocate(tmp2d(1,1))
        allocate(tmp3d(1,1,1))
     end if
+
+
+    ! ocean depth at obs loc
+    call g3dv_mpi_ij2grd_real(grid_local_D, tmp2d)
+    if (isroot) then
+       !TODO, this check should really be done in the obsop
+       i1 = obs_num
+       do i = obs_num, 1, -1          
+          if(obs(i)%dpth >= grid_interp2d(tmp2d, obs(i)%grd_w)) then
+             obs(i) = obs(obs_num)
+             obs_num = obs_num - 1
+          end if
+       end do
+       print *, (i1-obs_num), " removed for BELOW MODEL DEPTH"
+       i1 = obs_num
+    end if 
+
 
     ! SSH 
     call g3dv_mpi_ij2grd_real(grid_local_ssh, tmp2d)
@@ -366,15 +380,6 @@ contains
     end if 
    
 
-    ! ocean depth at obs loc
-    call g3dv_mpi_ij2grd_real(grid_local_D, tmp2d)
-    if (isroot) then
-       do i = 1, obs_num
-          obs(i)%grd_ocndpth = grid_interp2d(tmp2d, obs(i)%grd_w)
-       end do
-    end if 
-
-
     ! background variance
     ! TODO, do this correctly from the 3D field
     if(isroot) then
@@ -403,6 +408,7 @@ contains
           end if          
        end do
 
+       print '(A,I0,A)', "  ",obs_num," obs kepts after QC"       
        print *, "T increment min/max: ",stats_t
        print *, "S increment min/max: ",stats_s            
     end if    
@@ -710,7 +716,7 @@ contains
   
   subroutine obs_mpi_init()
     !! define a derived type to MPI
-    integer, parameter :: n = 13
+    integer, parameter :: n = 12
     integer :: blocklen(n)
     integer :: type(n)
     integer(kind=mpi_address_kind) :: disp(n), base
@@ -729,7 +735,6 @@ contains
     call mpi_get_address(ob%grd_var,   disp(10), ierr)
     call mpi_get_address(ob%grd_vtloc, disp(11), ierr)
     call mpi_get_address(ob%grd_coast, disp(12), ierr)
-    call mpi_get_address(ob%grd_ocndpth,disp(13), ierr)
     base = disp(1)
     do i=1,n
        disp(i) = disp(i) - base
@@ -740,7 +745,7 @@ contains
     type(1)     = mpi_integer
     type(2:7)   = mpi_real
     type(8)     = grid_mpi_interpweights
-    type(9:13)  = mpi_real
+    type(9:12)  = mpi_real
     
     call mpi_type_create_struct(n, blocklen, disp, type, obs_mpi_observation, ierr)
     call mpi_type_commit(obs_mpi_observation, ierr)
