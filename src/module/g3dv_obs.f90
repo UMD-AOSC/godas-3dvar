@@ -177,6 +177,7 @@ contains
     real, allocatable :: kd_lons(:), kd_lats(:)
 
     real :: stats_s(2), stats_t(2)
+    real :: stats_err_t(2), stats_err_s(2)
 
     real, allocatable :: tmp2d(:,:)
     real, allocatable :: tmp3d(:,:,:)
@@ -413,20 +414,30 @@ contains
        stats_s(1) = 1e10
        stats_t(2) = -1e10
        stats_s(2) = -1e10
+       stats_err_t(1) = 1e10
+       stats_err_s(1) = 1e10
+       stats_err_t(2) = -1e10
+       stats_err_s(2) = -1e10
        do i = 1, obs_num
           if(obs(i)%id == obs_id_t) then
              if(obs(i)%inc > stats_t(2)) stats_t(2) = obs(i)%inc
              if(obs(i)%inc < stats_t(1)) stats_t(1) = obs(i)%inc
+             if(obs(i)%err > stats_err_t(2)) stats_err_t(2) = obs(i)%err
+             if(obs(i)%err < stats_err_t(1)) stats_err_t(1) = obs(i)%err
           end if
           if(obs(i)%id == obs_id_s) then
              if(obs(i)%inc > stats_s(2)) stats_s(2) = obs(i)%inc
              if(obs(i)%inc < stats_s(1)) stats_s(1) = obs(i)%inc
+             if(obs(i)%err > stats_err_s(2)) stats_err_s(2) = obs(i)%err
+             if(obs(i)%err < stats_err_s(1)) stats_err_s(1) = obs(i)%err
           end if          
        end do
 
        print '(A,I0,A)', "  ",obs_num," obs kepts after QC"       
        print *, "T increment min/max: ",stats_t
+       print *, "T error     min/max: ",stats_err_t
        print *, "S increment min/max: ",stats_s            
+       print *, "S error     min/max: ",stats_err_s
     end if    
 
         
