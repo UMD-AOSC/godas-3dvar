@@ -50,13 +50,26 @@ module g3dv_solver
   integer :: maxitr = 10
   real    :: conv_ratio = 1e2
 
+  !#define SOLVER_PREC_SINGLE
+#ifdef SOLVER_PREC_SINGLE
+  integer, parameter :: r_p = kind(1.e0)
+  integer, parameter :: r_p_mpi = mpi_real
+#else
+  integer, parameter :: r_p = kind(1.d0)
+  integer, parameter :: r_p_mpi = mpi_double
+#endif
 
+  
   type local_obs_block_T
-     real, allocatable :: l(:)
+     real(r_p), allocatable :: l(:)
      logical :: l_valid
      integer :: idx
   end type local_obs_block_T
 
+
+
+
+    
 contains
 
 
@@ -80,6 +93,8 @@ contains
             new_line('a'), "solver_init() : preconditioned congjugate gradient solver",&
             new_line('a'), "------------------------------------------------------------"
     end if
+    
+    
 
     ! read in our section of the namelist
     open(newunit=unit, file=nml)
@@ -87,6 +102,16 @@ contains
     close(unit)
     if (isroot) print g3dv_solver
 
+    if(isroot) then
+       print *, ""
+#ifdef SOLVER_PREC_SINGLE
+       print *, "  Running in SINGLE precision mode."
+#else
+       print *, "  Running in DOUBLE precision mode."
+#endif
+    end if
+
+    
     !setup timer
     timer              = timer_init('(Solver)', TIMER_SYNC)
     timer_cholesky     = timer_init('  cholesky decomp',TIMER_SYNC)
@@ -112,21 +137,21 @@ contains
     !    real, intent(out), allocatable :: ai(:,:,:)
     real, intent(inout) :: local_ai(grid_ns, g3dv_mpi_ijcount)
     
-
+   
     integer :: i, j, k, m, n, itr
     integer :: ob1, ob2
     integer :: err, c_error
     real :: prev_lon, prev_lat
-
+    
     ! main variables needed by the conjugate gradient algorithm
-    real :: cg_z(obs_num)
-    real :: cg_r(obs_num)
-    real :: cg_p(obs_num)
-    real :: cg_q(obs_num)
-    real :: cg_s(obs_num)
-    real :: cg_beta, cg_alpha, cg_rs, cg_rs_prev
-    real :: cg_q_j
-    real :: resid0, resid
+    real(r_p) :: cg_z(obs_num)
+    real(r_p) :: cg_r(obs_num)
+    real(r_p) :: cg_p(obs_num)
+    real(r_p) :: cg_q(obs_num)
+    real(r_p) :: cg_s(obs_num)
+    real(r_p) :: cg_beta, cg_alpha, cg_rs, cg_rs_prev
+    real(r_p) :: cg_q_j
+    real(r_p) :: resid0, resid
 
     ! local segment of observation blocks
     integer :: local_obs_block_num
@@ -188,7 +213,12 @@ contains
        local_obs_block(i)%l_valid = .true.
 
        ! calculate the Cholesky decomposition
+#ifdef SOLVER_PREC_SINGLE       
        call spptrf('L', obs_block_size(local_obs_block(i)%idx), local_obs_block(i)%l, err)
+#else
+       call dpptrf('L', obs_block_size(local_obs_block(i)%idx), local_obs_block(i)%l, err)
+#endif
+       
        if (err /= 0) then
           local_obs_block(i)%l_valid = .false.
           c_error = c_error + 1
@@ -198,8 +228,7 @@ contains
              ob1  = obs_block_start(local_obs_block(i)%idx) + j -1
              print *, j, obs(ob1)%id, obs(ob1)%lat, obs(ob1)%lon, obs(ob1)%dpth, obs(ob1)%grd_w%y(1), obs(ob1)%grd_vtloc
           end do
-          stop 1
-          
+          stop 1          
        end if
     end do
     call timer_stop(timer_cholesky)
@@ -226,7 +255,7 @@ contains
 
     ! initialize
     !------------------------------
-    cg_z = 0
+    cg_z = 0.0
     do i = 1, size(cg_r)
        cg_r(i) = obs(i)%inc
     end do
@@ -254,7 +283,7 @@ contains
 
        ! apply bg cov between each point
        ! ------------------------------
-       cg_q = 0
+       cg_q = 0.0
        prev_lat = 1e30
        prev_lon = 1e30
        do i = 1, size(obs_local_idx)
@@ -278,11 +307,11 @@ contains
           !------------------------------
           call timer_start(timer_bgcov_HBH)
 
-          ! variance
+          ! obs error ( R )
           cg_q_j = cg_p(j)*obs(j)%err**2
 
-          ! correlation
-          do k = 1, num                
+          ! covariance ( HBH )
+          do k = 1, num                 
              cg_q_j = cg_q_j + cg_p(obs_points(k)) * &
                   bgcov_HBH(obs(j), obs(obs_points(k)), obs_dist(k))
           end do
@@ -296,7 +325,7 @@ contains
        ! TODO, move this to g3dv_mpi module
        ! TODO, do this more efficiently
        call timer_start(timer_pcg_mpi)
-       call mpi_allreduce(mpi_in_place, cg_q, size(cg_q), mpi_real, mpi_sum, g3dv_mpi_comm, i)
+       call mpi_allreduce(mpi_in_place, cg_q, size(cg_q), r_p_mpi, mpi_sum, g3dv_mpi_comm, i)
        call timer_stop(timer_pcg_mpi)
 
        ! calculate other things
@@ -345,7 +374,7 @@ contains
 
        
        ! for each observation found...
-       cov = 0
+       cov = 0.0
        call timer_start(timer_bgcov_BH)       
        do j = 1, num
           k = obs_points(j)
@@ -382,8 +411,8 @@ contains
 
   
   subroutine precondition(blocks, r,s)
-    real, intent(in)  :: r(:)
-    real, intent(out) :: s(:)
+    real(r_p), intent(in)  :: r(:)
+    real(r_p), intent(out) :: s(:)
     type(local_obs_block_T), intent(in) :: blocks(:)
 
     integer :: i, err, vs, ve
@@ -395,8 +424,13 @@ contains
        ve = obs_block_end(  blocks(i)%idx)
        s(vs:ve) = r(vs:ve)          
        if(blocks(i)%l_valid) then
+#ifdef SOLVER_PREC_SINGLE          
           call spptrs('L', obs_block_size(blocks(i)%idx), 1, blocks(i)%L, &
                s(vs:ve), obs_block_size(blocks(i)%idx), err)
+#else
+          call dpptrs('L', obs_block_size(blocks(i)%idx), 1, blocks(i)%L, &
+               s(vs:ve), obs_block_size(blocks(i)%idx), err)
+#endif        
           if(err/=0)then
              print *, "ERROR applying preconditioner"
              stop 1
@@ -408,7 +442,7 @@ contains
     ! TODO, move this to g3dv_mpi module
     ! TODO, do this more efficiently
     call timer_start(timer_pcg_mpi)           
-    call mpi_allreduce(mpi_in_place, s, size(s), mpi_real, mpi_sum, g3dv_mpi_comm, i)
+    call mpi_allreduce(mpi_in_place, s, size(s), r_p_mpi, mpi_sum, g3dv_mpi_comm, i)
     call timer_stop(timer_pcg_mpi)
     
     call timer_stop(timer_precond)
