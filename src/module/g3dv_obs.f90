@@ -15,6 +15,7 @@ module g3dv_obs
   use g3dv_grid
   use g3dv_mpi
 
+  use ieee_arithmetic
   implicit none
   private
 
@@ -247,6 +248,20 @@ contains
     end if
 
 
+    ! ------------------------------
+    allocate(tmpij(g3dv_mpi_ijcount))
+    if (isroot) then
+       allocate(tmp2d(grid_nx, grid_ny))
+       allocate(tmp3d(grid_nx, grid_ny, grid_nz))
+    else
+       ! fortran complains in debug mode about tmp2d and tmp3d
+       ! being used uninitialized (which they aren't), this is just
+       ! to keep Fortran from complaining
+       allocate(tmp2d(1,1))
+       allocate(tmp3d(1,1,1))
+    end if
+
+
     ! load/generate obs
     ! NOTE: this is performed only on the root proc
     !------------------------------
@@ -262,7 +277,8 @@ contains
        end if       
        print *, "observations read in:",obs_num
        
-       ! TODO, do QC checks
+       ! Do QC checks
+       ! ------------------------------------------------------------
        print *, ""
        print *, "Performing QC..."
        
@@ -287,7 +303,6 @@ contains
        end do
        print *, (i1-obs_num), " removed for TYPE NOT ASSIMILATED"
        i1 = obs_num
-
        
        ! remove obs that fail the gross QC checks
        do i = obs_num, 1, -1
@@ -300,39 +315,40 @@ contains
        print *, (i1-obs_num), " removed for FAILING GROSS QC"
        i1 = obs_num
 
-       ! generate interpolation weights / values
+       ! remove obs that contain NaNs
+       do i = obs_num, 1, -1
+          if(ieee_is_nan(obs(i)%inc) .or. ieee_is_nan(obs(i)%err)) then
+             obs(i) = obs(obs_num)
+             obs_num = obs_num -1
+          end if
+       end do
+       print *, (i1-obs_num), " removed for NAN FOUND"
+       i1 = obs_num
+    end if
+
+    ! generate interpolation weights / values    
+    call g3dv_mpi_ij2grd_real(grid_local_mask, tmp2d)
+    if(isroot) then
        i1 = obs_num       
        do i = obs_num, 1, -1
           ! generate interpolation weights          
           obs(i)%grd_w = grid_genweights(obs(i)%lat, obs(i)%lon, obs(i)%dpth)
-          ! TODO, remove ob if on land, or below lowest level of ocean column
-          
-!          ! if grid point finding failed (on land?) remove this ob
-!          if(obs(i)%grd_w%z ) <= 0) then
-!             obs(i) = obs(obs_num)
-!             obs_num = obs_num - 1
-!             cycle
-!          end if
-       end do          
+
+          ! remove obs where interpolation weights place it on land
+          ! TODO, fix the gen_weights function so this never happens
+          if(tmp2d(obs(i)%grd_w%x(1), obs(i)%grd_w%y(1)) < 1) then
+             obs(i) = obs(obs_num)
+             obs_num = obs_num - 1
+             cycle
+          end if
+       end do
        print *, (i1-obs_num), " removed for ON LAND"
     end if
     
 
     
-    !interpolate certain fields to the observation locations
+    !interpolate certain other fields to the observation locations
     !------------------------------------------------------------
-    allocate(tmpij(g3dv_mpi_ijcount))
-    if (isroot) then
-       allocate(tmp2d(grid_nx, grid_ny))
-       allocate(tmp3d(grid_nx, grid_ny, grid_nz))
-    else
-       ! fortran complains in debug mode about tmp2d and tmp3d
-       ! being used uninitialized (which they aren't), this is just
-       ! to keep Fortran from complaining
-       allocate(tmp2d(1,1))
-       allocate(tmp3d(1,1,1))
-    end if
-
 
     ! ocean depth at obs loc
     call g3dv_mpi_ij2grd_real(grid_local_D, tmp2d)
@@ -340,7 +356,7 @@ contains
        !TODO, this check should really be done in the obsop
        i1 = obs_num
        do i = obs_num, 1, -1          
-          if(obs(i)%dpth >= grid_interp2d(tmp2d, obs(i)%grd_w)) then
+          if(grid_dpth(obs(i)%grd_w%z) >= tmp2d(obs(i)%grd_w%x(1),obs(i)%grd_w%y(1))) then
              obs(i) = obs(obs_num)
              obs_num = obs_num - 1
           end if
@@ -388,8 +404,8 @@ contains
           if(obs(i)%id == obs_id_s) obs(i)%grd_var = 0.1
        end do
     end if
-    
-    
+
+
     ! other stats to print
     !------------------------------
     if(isroot) then
@@ -462,8 +478,8 @@ contains
        end if
     end if
 
-    
-    ! create KD tree (root has already done this)
+
+    ! create KD tree
     !------------------------------
     allocate(kd_lons(obs_num))
     allocate(kd_lats(obs_num))

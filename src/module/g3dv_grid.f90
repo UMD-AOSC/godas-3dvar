@@ -29,7 +29,7 @@ module g3dv_grid
   type grid_interpweights
      integer :: x(4)
      integer :: y(4)
-     integer :: z(2)
+     integer :: z
      real    :: w_h(4)
      real    :: w_v
   end type grid_interpweights
@@ -112,7 +112,7 @@ contains
     v = 0.0
     do i = 1, 1
        if (w%w_h(i) == 0) cycle
-       v = v + grd(w%x(i), w%y(i), w%z(i)) * w%w_h(i)
+       v = v + grd(w%x(i), w%y(i), w%z) * w%w_h(i)
     end do
 
     !TODO, this doesn't do z properly
@@ -387,7 +387,7 @@ contains
     end do
 
     blocklen = 4
-    blocklen(3) = 2
+    blocklen(3) = 1
     blocklen(5) = 1
 
     type(1:3) = mpi_integer
