@@ -41,6 +41,7 @@ module g3dv_bgcov
   real :: vt_loc_max = -1
   real :: vt_loc_min = -1
   real :: vt_loc_pow = 1
+  real :: vt_loc_diff_scale = 2.0
   real :: time_loc = -1
   real :: tnsr_surf  = -1.0   ! surface (SSH) gradient tensor
   real :: tnsr_coast_dist = -1.0       ! coast gradient tensor
@@ -75,7 +76,7 @@ contains
     
 
     namelist /g3dv_bgcov/ hz_loc, vt_loc, vt_loc_min, vt_loc_max, vt_loc_pow,&
-         time_loc, tnsr_surf, tnsr_coast_dist, tnsr_coast_min, bgvar_t, bgvar_s
+         vt_loc_diff_scale, time_loc, tnsr_surf, tnsr_coast_dist, tnsr_coast_min, bgvar_t, bgvar_s
 
 
     if(isroot) then
@@ -307,7 +308,7 @@ contains
     ! It makes the algorithm stable... trust me
     vt_cor = loc(abs(ob1%dpth-ob2%dpth),  (ob1%grd_vtloc+ob2%grd_vtloc)/2.0)
     vt_cor = vt_cor *&
-         loc(abs(ob1%grd_vtloc-ob2%grd_vtloc), (ob1%grd_vtloc+ob2%grd_vtloc)/2.0)
+         loc(abs(ob1%grd_vtloc-ob2%grd_vtloc), (ob1%grd_vtloc+ob2%grd_vtloc)/(2.0*vt_loc_diff_scale))
     if(vt_cor <= 0) return
     
     ! horizontal localization
@@ -362,7 +363,7 @@ contains
        if(bgcov_local_vtloc(i,ij) <= 0.0) exit
        r = loc(abs(grid_dpth(i)-ob%dpth),  (ob%grd_vtloc+bgcov_local_vtloc(i,ij))/2.0)
        r = r * loc(abs(ob%grd_vtloc-bgcov_local_vtloc(i,ij)), &
-            (ob%grd_vtloc+bgcov_local_vtloc(i,ij))/2.0)
+            (ob%grd_vtloc+bgcov_local_vtloc(i,ij))/(2.0*vt_loc_diff_scale))
        vt_cor(i) = r
     end do
        
