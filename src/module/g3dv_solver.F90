@@ -59,6 +59,9 @@ module g3dv_solver
   integer, parameter :: r_p_mpi = mpi_double
 #endif
 
+  ! other output
+  real, public, protected, allocatable :: solver_local_maxobcor(:,:)
+
   
   type local_obs_block_T
      real(r_p), allocatable :: l(:)
@@ -162,9 +165,12 @@ contains
     real    :: obs_dist(obs_num)
     real    :: r
     integer :: num
-    real    :: cov(grid_ns)
+    real    :: cov(grid_ns), cor(grid_ns), var(grid_ns), cor_max(grid_ns)
 
     call timer_start(timer)
+    
+    allocate(solver_local_maxobcor(grid_ns, g3dv_mpi_ijcount))
+    solver_local_maxobcor = 0.0
 
     ! determine the number of observation blocks this proc is responsible for,
     ! and initialize the local obs block information
@@ -375,19 +381,23 @@ contains
        
        ! for each observation found...
        cov = 0.0
+       cor_max = 0.0
        call timer_start(timer_bgcov_BH)       
        do j = 1, num
           k = obs_points(j)
 
           ! calculate the covariance between the observation and each variable / 
           ! level of the grid column
-          cov = cov + cg_z(k)*bgcov_BH(obs(k), obs_dist(j), i)
-          where (abs(cov) > 0.01) grid_local_diag3d_2(:,i) = grid_local_diag3d_2(:,i)+1
-
+          call bgcov_BH(obs(k), obs_dist(j), i, cor, var)
+          cov = cov + cg_z(k)*cor*var
+          do k = 1, grid_ns
+             cor_max(k) = max(cor_max(k), cor(k))
+          end do
        end do
-       call timer_stop(timer_bgcov_BH)       
+       call timer_stop(timer_bgcov_BH)
        ! apply observation effect on grid       
        local_ai(:,i) = cov
+       solver_local_maxobcor(:,i) = cor_max
 
     end do
 

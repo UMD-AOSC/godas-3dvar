@@ -63,7 +63,7 @@ module g3dv_grid
   real, public, protected, allocatable :: grid_local_dens(:,:)
   real, public, protected, allocatable :: grid_local_D(:)
 
-  real, public, allocatable :: grid_local_diag3D_2(:,:)
+!  real, public, allocatable :: grid_local_diag3D_2(:,:)
 
 
 
@@ -188,7 +188,7 @@ contains
     allocate(grid_local_ssh(g3dv_mpi_ijcount))
     allocate(grid_local_coastdist(g3dv_mpi_ijcount))    
     allocate(grid_local_dens(grid_nz, g3dv_mpi_ijcount))
-    allocate(grid_local_diag3d_2(grid_ns, g3dv_mpi_ijcount))
+!    allocate(grid_local_diag3D_2(grid_ns, g3dv_mpi_ijcount))
     allocate(tmpij(g3dv_mpi_ijcount))
     if(isroot) then
        allocate(tmp2d(grid_nx, grid_ny))

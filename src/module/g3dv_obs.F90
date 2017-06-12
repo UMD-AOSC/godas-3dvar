@@ -15,7 +15,10 @@ module g3dv_obs
   use g3dv_grid
   use g3dv_mpi
 
+#ifdef __INTEL_COMPILER
   use ieee_arithmetic
+#endif
+
   implicit none
   private
 
@@ -318,10 +321,17 @@ contains
 
        ! remove obs that contain NaNs
        do i = obs_num, 1, -1
+#ifdef __INTEL_COMPILER
           if(ieee_is_nan(obs(i)%inc) .or. ieee_is_nan(obs(i)%err)) then
              obs(i) = obs(obs_num)
              obs_num = obs_num -1
           end if
+#else
+          if(isnan(obs(i)%inc) .or. isnan(obs(i)%err)) then
+             obs(i) = obs(obs_num)
+             obs_num = obs_num -1
+          end if
+#endif
        end do
        print *, (i1-obs_num), " removed for NAN FOUND"
        i1 = obs_num

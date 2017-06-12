@@ -147,6 +147,7 @@ contains
     real, intent(in) :: dpth(:)
     real :: vtloc(size(dens))
 
+    real :: r
     real :: loc_u(size(dens))
     real :: loc_d(size(dens))
     
@@ -170,6 +171,8 @@ contains
                   (dens(z) - vt_loc-dens(z2+1))&
                   * (dpth(z2) - dpth(z2+1)) &
                   / (dens(z2) - dens(z2+1))
+             r = (dpth(z)-dpth(z-1))
+             if(loc_u(z) <  r) loc_u(z) = r
              exit
           end if
        end do
@@ -181,6 +184,8 @@ contains
                   (dens(z) + vt_loc-dens(z2-1))&
                   * (dpth(z2) - dpth(z2-1)) &
                   / (dens(z2) - dens(z2-1))
+             r = (dpth(z+1)-dpth(z))
+             if(loc_d(z) <  r) loc_d(z) = r
              exit
           end if
        end do       
@@ -342,17 +347,35 @@ contains
   !================================================================================
 
 
-  pure function bgcov_BH(ob, dist, ij) result(cov)
+  pure subroutine bgcov_BH(ob, dist, ij, cor, var)
+    ! return correlation and variance separately
+    ! final covariance will just be cor*var
+
     type(observation), intent(in) :: ob    
-    real, intent(in) :: dist
-    integer, intent(in) :: ij
-    real :: cov(grid_ns)
+    real,    intent(in)  :: dist
+    integer, intent(in)  :: ij
+    real,    intent(out) :: cor(grid_ns), var(grid_ns)
 
     real :: hz_cor, time_cor, surf_tensor, coast_tensor, vt_cor(grid_nz)
 
-    integer :: i
+    integer :: i, idx_start
     real :: r
 
+
+    ! univariate correlation for now
+    if(ob%id == obs_id_t) then       
+       idx_start = grid_var_t
+    else if(ob%id == obs_id_s) then
+       idx_start = grid_var_s
+    else
+       cor =0
+       var = 0
+       return
+    end if
+    cor = 0.0
+    do i = 1, grid_nz
+       cor(idx_start+i-1) = 1.0
+    end do
 
 
     ! vertical localization distance is the average of vt_loc of the two points 
@@ -366,27 +389,29 @@ contains
             (ob%grd_vtloc+bgcov_local_vtloc(i,ij))/(2.0*vt_loc_diff_scale))
        vt_cor(i) = r
     end do
-       
-    !univariate for now
-    cov = 0.0
-    if( ob%id == obs_id_t) then
-       cov(grid_var_t:grid_var_t+grid_nz-1) = vt_cor * bgvar_t !TODO, use 3D variance
-    else if(ob%id == obs_id_s) then
-       cov(grid_var_s:grid_var_s+grid_nz-1) = vt_cor * bgvar_s !TODO, use 3D variance
-    end if
+    
+     
+    !variance 
+    var(grid_var_t:grid_var_t+grid_nz-1) = bgvar_t !TODO, use 3D variance
+    var(grid_var_s:grid_var_s+grid_nz-1) = bgvar_s !TODO, use 3D variance
+    var = var * obs%grd_var
+
 
     ! horizontal localization    
     hz_cor = loc(dist, (bgcov_hzdist(grid_local_lat(ij))+ bgcov_hzdist(ob%lat))/2.0)
+
 
     ! temporal localization
     time_cor = merge( &
                loc(abs(ob%hr), time_loc),&
                1.0, time_loc > 0.0)
 
+
     ! gradient tensor localizations
     surf_tensor = merge( &
                loc(abs(ob%grd_ssh - grid_local_ssh(ij)), tnsr_surf),&
                1.0, tnsr_surf > 0.0)
+
 
     coast_tensor = merge( &
         max(tnsr_coast_min, &
@@ -395,10 +420,13 @@ contains
            / tnsr_coast_dist), &
         1.0, tnsr_coast_dist > 0.0)
 
-    ! add it all up
-    cov = cov * hz_cor * time_cor * surf_tensor * coast_tensor * ob%grd_var
 
-  end function bgcov_BH
+    ! add up all the correlations
+    cor(grid_var_t:grid_var_t+grid_nz-1) = cor(grid_var_t:grid_var_t+grid_nz-1) * vt_cor
+    cor(grid_var_s:grid_var_s+grid_nz-1) = cor(grid_var_s:grid_var_s+grid_nz-1) * vt_cor
+    cor = cor * hz_cor * time_cor * surf_tensor * coast_tensor
+
+  end subroutine bgcov_BH
 
 
 
