@@ -95,7 +95,7 @@ contains
      call obs_obsio_reg(obsio_ptr)
      allocate(obsio_nc :: obsio_ptr)
      call obs_obsio_reg(obsio_ptr)    
-     call obs_init(isroot, nml_filename, bgcov_local_vtloc, bgcov_local_var)  
+     call obs_init(isroot, nml_filename, bgcov_local_vtloc, bgcov_local_var_t, bgcov_local_var_s)
 
     
      ! initialize other modules 

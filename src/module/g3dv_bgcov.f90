@@ -9,6 +9,7 @@ module g3dv_bgcov
   use g3dv_mpi
   use g3dv_obs
   use g3dv_grid
+  use g3dv_datatable, only : datatable_get
   use timing
 
   implicit none
@@ -26,7 +27,9 @@ module g3dv_bgcov
   ! public module variables
   !------------------------------------------------------------
   real, public, allocatable :: bgcov_local_vtloc(:,:)
-  real, public, allocatable :: bgcov_local_var(:,:)
+  real, public, allocatable :: bgcov_local_var_t(:,:)
+  real, public, allocatable :: bgcov_local_var_s(:,:)
+
 
 
   ! private module variables
@@ -46,8 +49,8 @@ module g3dv_bgcov
   real :: tnsr_surf  = -1.0   ! surface (SSH) gradient tensor
   real :: tnsr_coast_dist = -1.0       ! coast gradient tensor
   real :: tnsr_coast_min  = 0.0
-  real :: bgvar_t = 1.0
-  real :: bgvar_s = 0.1
+  real :: bgvar_t = -1
+  real :: bgvar_s = -1
   
 
   
@@ -73,7 +76,8 @@ contains
     integer ::  btm_lvl
 
     integer :: timer
-    
+    real, allocatable :: tmp3d(:,:,:)
+    real, allocatable :: tmpij(:)
 
     namelist /g3dv_bgcov/ hz_loc, vt_loc, vt_loc_min, vt_loc_max, vt_loc_pow,&
          vt_loc_diff_scale, time_loc, tnsr_surf, tnsr_coast_dist, tnsr_coast_min, bgvar_t, bgvar_s
@@ -120,12 +124,52 @@ contains
     end do
 
     
-    ! Compute the background error variance
+    ! Load the background error variance
     !------------------------------------------------------------
-    ! TODO, calculate based on background density
-    allocate(bgcov_local_var(grid_ns, g3dv_mpi_ijcount))
-    bgcov_local_var(grid_var_t:grid_var_t+grid_nz-1,:) = bgvar_t
-    bgcov_local_var(grid_var_s:grid_var_s+grid_nz-1,:) = bgvar_s
+    if (isroot) then
+       print *, ""
+       print *, "Loading background error variance..."
+    end if
+    allocate(bgcov_local_var_t(grid_nz, g3dv_mpi_ijcount))
+    allocate(bgcov_local_var_s(grid_nz, g3dv_mpi_ijcount))
+
+    ! temperature
+    if(bgvar_t >= 0) then
+       bgcov_local_var_t = bgvar_t
+       if(isroot) print *, "Using fixed TEMP bg err var: ", bgvar_t
+    else
+       allocate(tmpij(g3dv_mpi_ijcount))
+       if(isroot) then
+          allocate(tmp3d(grid_nx, grid_ny, grid_nz))
+          call datatable_get('bgvar_t', tmp3d)
+       end if
+       do i = 1, grid_nz
+          call g3dv_mpi_grd2ij_real(tmp3d(:,:,i), tmpij)
+          bgcov_local_var_t(i, :) = tmpij
+       end do
+    end if
+
+    ! salinity
+    if(bgvar_s >= 0) then
+       bgcov_local_var_s = bgvar_s
+       if(isroot) print *, "Using fixed SALT bg err var: ", bgvar_s
+    else
+       if(.not. allocated(tmpij)) allocate(tmpij(g3dv_mpi_ijcount))
+       if(isroot) then
+          if(.not. allocated(tmp3d)) allocate(tmp3d(grid_nx, grid_ny, grid_nz))
+          call datatable_get('bgvar_s', tmp3d)
+       end if
+       do i = 1, grid_nz
+          call g3dv_mpi_grd2ij_real(tmp3d(:,:,i), tmpij)
+          bgcov_local_var_s(i,:) = tmpij
+       end do
+    end if
+
+    if(allocated(tmp3d)) then
+       deallocate(tmp3d)
+       deallocate(tmpij)
+    end if
+    
 
 
     ! TODO, density is no longer needed, have the grid module delete that data
@@ -373,9 +417,7 @@ contains
        return
     end if
     cor = 0.0
-    do i = 1, grid_nz
-       cor(idx_start+i-1) = 1.0
-    end do
+    cor(idx_start:idx_start+grid_nz-1) = 1.0
 
 
     ! vertical localization distance is the average of vt_loc of the two points 
@@ -392,9 +434,8 @@ contains
     
      
     !variance 
-    var(grid_var_t:grid_var_t+grid_nz-1) = bgvar_t !TODO, use 3D variance
-    var(grid_var_s:grid_var_s+grid_nz-1) = bgvar_s !TODO, use 3D variance
-    var = var * obs%grd_var
+    var(grid_var_t:grid_var_t+grid_nz-1) = bgcov_local_var_t(:,ij)*ob%grd_var
+    var(grid_var_s:grid_var_s+grid_nz-1) = bgcov_local_var_s(:,ij)*ob%grd_var
 
 
     ! horizontal localization    

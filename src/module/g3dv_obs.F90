@@ -155,13 +155,13 @@ contains
 
 
 
-  subroutine obs_init(root, nml, local_vtloc, local_var)
+  subroutine obs_init(root, nml, local_vtloc, local_var_t, local_var_s)
     !! TODO, describe what this does... this does a lot
     
     logical, intent(in) :: root
     character(len=*), intent(in) :: nml
     real, intent(in) :: local_vtloc(:,:)
-    real, intent(in) :: local_var(:,:)
+    real, intent(in) :: local_var_t(:,:), local_var_s(:,:)
 
     character(len=:), allocatable :: ioclass
     
@@ -408,11 +408,30 @@ contains
    
 
     ! background variance
-    ! TODO, do this correctly from the 3D field
+    ! ------------------------------------------------------------
+    ! temperature
+    do i = 1, grid_nz
+       tmpij = local_var_t(i,:)
+       call g3dv_mpi_ij2grd_real(tmpij, tmp2d)
+       if (isroot) tmp3d(:,:,i) = tmp2d
+    end do
     if(isroot) then
        do i = 1, obs_num
-          if(obs(i)%id == obs_id_t) obs(i)%grd_var = 1.0
-          if(obs(i)%id == obs_id_s) obs(i)%grd_var = 0.1
+          if(obs(i)%id /= obs_id_t) cycle
+          obs(i)%grd_var = grid_interp3d(tmp3d, obs(i)%grd_w)
+       end do
+    end if
+
+    ! salinity
+    do i = 1, grid_nz
+       tmpij = local_var_s(i,:)
+       call g3dv_mpi_ij2grd_real(tmpij, tmp2d)
+       if (isroot) tmp3d(:,:,i) = tmp2d
+    end do
+    if(isroot) then
+       do i = 1, obs_num
+          if(obs(i)%id /= obs_id_s) cycle
+          obs(i)%grd_var = grid_interp3d(tmp3d, obs(i)%grd_w)
        end do
     end if
 
