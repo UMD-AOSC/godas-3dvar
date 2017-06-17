@@ -193,6 +193,7 @@ contains
          " Performing Cholesky decomposition of observation blocks...", new_line('a')
     c_error = 0
     call timer_start(timer_cholesky)
+    ! for each block this proc is responsible for
     do i = 1, size(local_obs_block)
        ! create a compact array of size n*(n+1)/2
        ! where n = number of observations in this block
@@ -201,20 +202,18 @@ contains
        j = j*(j+1) / 2
        allocate(local_obs_block(i)%l(j))
        
-       ! generate the values of the matrix [HBH^T+R] for this block
+       ! generate the values of the matrix A*=[HBH^T+R] for this block
        n = obs_block_size(local_obs_block(i)%idx)
        do j = 1, n
           ob1  = obs_block_start(local_obs_block(i)%idx) + j -1
+          ! HBH^T
           do k = 1, j
              ob2 = obs_block_start(local_obs_block(i)%idx) + k -1
              m = j + (k-1)*(2*n-k)/2
-             
-             if(ob1 == ob2)  then
-                local_obs_block(i)%l(m) = 1.0 + obs(ob1)%err**2                
-             else
-                local_obs_block(i)%l(m) = bgcov_HBH(obs(ob1), obs(ob2))
-             end if
+             local_obs_block(i)%l(m) = bgcov_HBH(obs(ob1), obs(ob2))
           end do
+          ! diagonals of R
+          local_obs_block(i)%l(m) = local_obs_block(i)%l(m) + obs(ob1)%err**2                
        end do
        local_obs_block(i)%l_valid = .true.
 
@@ -224,7 +223,8 @@ contains
 #else
        call dpptrf('L', obs_block_size(local_obs_block(i)%idx), local_obs_block(i)%l, err)
 #endif
-       
+
+       ! print a warning message if the cholesky decomposition failed
        if (err /= 0) then
           local_obs_block(i)%l_valid = .false.
           c_error = c_error + 1
@@ -238,7 +238,7 @@ contains
        end if
     end do
     call timer_stop(timer_cholesky)
-    
+   
     c_error = g3dv_mpi_bcstflag(c_error)
     if(isroot .and. c_error > 0) then
        print *, ""
