@@ -51,7 +51,7 @@ module g3dv_bgcov
   real :: tnsr_coast_min  = 0.0
   real :: bgvar_t = -1
   real :: bgvar_s = -1
-  
+  real :: hz_loc_scale = 2.0
 
   
   interface loc
@@ -71,15 +71,15 @@ contains
     logical, intent(in) :: isroot
     character(len=*), intent(in) :: nml
 
-    ! parameters read in from namelist
     integer :: unit, i, z
     integer ::  btm_lvl
+    real :: r
 
     integer :: timer
     real, allocatable :: tmp3d(:,:,:)
     real, allocatable :: tmpij(:)
 
-    namelist /g3dv_bgcov/ hz_loc, vt_loc, vt_loc_min, vt_loc_max, vt_loc_pow,&
+    namelist /g3dv_bgcov/ hz_loc, hz_loc_scale, vt_loc, vt_loc_min, vt_loc_max, vt_loc_pow,&
          vt_loc_diff_scale, time_loc, tnsr_surf, tnsr_coast_dist, tnsr_coast_min, bgvar_t, bgvar_s
 
 
@@ -96,7 +96,18 @@ contains
     close(unit)
     if(isroot) print g3dv_bgcov
 
-   
+    if(isroot) then
+       print *, ""
+       print *, " Horizontal correlation length scales summary:"
+       print *, " Latitude         scale (km)"
+       r = 0
+       do while(r <= 90)
+          print *, r, bgcov_hzdist(r)
+          r = r + 10.0
+       end do
+    end if
+
+
     ! Compute vertical localization distance field
     ! ------------------------------------------------------------
     timer = timer_init(" bgcov_vtloc", TIMER_SYNC)
@@ -487,7 +498,7 @@ contains
        cor = hz_loc(1)
     else
        cor = max(hz_loc(2), min(hz_loc(1), &
-            2.6/(2*omega*abs(sin(lat*pi/180.0))) ))
+            hz_loc_scale*2.6/(2*omega*abs(sin(lat*pi/180.0))) ))
     end if
   end function bgcov_hzdist
 
