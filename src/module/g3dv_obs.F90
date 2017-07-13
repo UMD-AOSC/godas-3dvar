@@ -107,12 +107,13 @@ module g3dv_obs
        import obsio
        class(obsio) :: self
      end subroutine I_obsio_init
-     subroutine I_obsio_write(self, file, obs)
+     subroutine I_obsio_write(self, file, obs, obs_qc)
        import obsio
        import observation
        class(obsio) :: self
        character(len=*),  intent(in) :: file
        type(observation), intent(in) :: obs(:)
+       integer, intent(in) :: obs_qc(:)
      end subroutine I_obsio_write
      subroutine I_obsio_read(self, file, obs)
        import obsio
@@ -168,6 +169,8 @@ contains
     integer :: timer
     integer :: unit, i, j, i1
 
+    integer, allocatable :: obs_qc(:)
+    
     ! parameters read in from namelist
     logical :: test_obs = .false.
     integer :: test_obs_max = 20
@@ -177,6 +180,7 @@ contains
     logical :: use_s = .true.
 
     real :: inc_max_t, inc_max_s
+    real :: qc_max = 3.0
     real, allocatable :: kd_lons(:), kd_lats(:)
 
     real :: stats_s(2), stats_t(2)
@@ -187,8 +191,7 @@ contains
     real, allocatable :: tmpij(:)
     
     namelist /g3dv_obs/ test_obs, test_obs_max, ioclass, obsfile, depth_max,&
-         obs_id_t, obs_id_s, use_t, use_s, inc_max_t, inc_max_s, obs_block_dx, obs_block_dy
-
+         obs_id_t, obs_id_s, use_t, use_s, qc_max, inc_max_t, inc_max_s, obs_block_dx, obs_block_dy
 
     isroot = root
     timer = timer_init(" observations", TIMER_SYNC)
@@ -280,80 +283,92 @@ contains
           obs_num = size(obs)
        end if       
        print *, "observations read in:",obs_num
+
+       allocate(obs_qc(obs_num))
+       obs_qc = 0
        
        ! Do QC checks
        ! ------------------------------------------------------------
        print *, ""
        print *, "Performing QC..."
-       
-       ! remove obs below the max depth
-       i1 = obs_num
-       do i = obs_num, 1, -1
-          if(depth_max >0 .and. obs(i)%dpth > depth_max) then
-             obs(i) = obs(obs_num)
-             obs_num = obs_num - 1
-          end if
-       end do
-       print *, (i1-obs_num), " removed for BELOW MAX DEPTH"
-       i1 = obs_num
+
        
        ! remove obs types we dont want to assimilate
-       do i = obs_num, 1, -1
+       i1 = 0
+       do i = 1, obs_num
+          if(obs_qc(i) >0) cycle
           if( (.not. use_t .and. obs(i)%id == obs_id_t ) .or. &
-              (.not. use_s .and. obs(i)%id == obs_id_s ) ) then
-             obs(i) = obs(obs_num)
-             obs_num = obs_num - 1
+               (.not. use_s .and. obs(i)%id == obs_id_s ) ) then
+             obs_qc(i) = 10
+             i1 = i1 + 1
           end if
        end do
-       print *, (i1-obs_num), " removed for TYPE NOT ASSIMILATED"
-       i1 = obs_num
+       print *, i1, " removed for TYPE NOT ASSIMILATED"
+
+       
+       ! remove obs below the max depth       
+       i1 = 0
+       do i = 1, obs_num
+          if(obs_qc(i) >0) cycle
+          if(depth_max >0 .and. obs(i)%dpth > depth_max) then
+             obs_qc(i) = 11
+             i1 = i1 + 1
+          end if
+       end do
+       print *, i1, " removed for BELOW MAX DEPTH"
+       
        
        ! remove obs that fail the gross QC checks
-       do i = obs_num, 1, -1
+       i1 = 0
+       do i = 1, obs_num
+          if(obs_qc(i) >0) cycle
           if( (obs(i)%id == obs_id_t .and. abs(obs(i)%inc) > inc_max_t) .or. &
                (obs(i)%id == obs_id_s .and. abs(obs(i)%inc) > inc_max_s)) then
-             obs(i) = obs(obs_num)
-             obs_num = obs_num -1
+             obs_qc(i) = 12
+             i1 = i1 + 1
           end if
        end do
-       print *, (i1-obs_num), " removed for FAILING GROSS QC"
-       i1 = obs_num
+       print *, i1, " removed for FAILING GROSS QC"
 
+       
        ! remove obs that contain NaNs
-       do i = obs_num, 1, -1
+       i1 = 0
+       do i = 1, obs_num
+          if(obs_qc(i) >0) cycle
 #ifdef __INTEL_COMPILER
           if(ieee_is_nan(obs(i)%inc) .or. ieee_is_nan(obs(i)%err)) then
-             obs(i) = obs(obs_num)
-             obs_num = obs_num -1
+             obs_qc(i) = 13
+             i1 = i1 + 1
           end if
 #else
           if(isnan(obs(i)%inc) .or. isnan(obs(i)%err)) then
-             obs(i) = obs(obs_num)
-             obs_num = obs_num -1
+             obs_qc(i) = 13
+             i1 = i1 + 1
           end if
 #endif
        end do
-       print *, (i1-obs_num), " removed for NAN FOUND"
-       i1 = obs_num
+       print *, i1, " removed for NAN FOUND"
     end if
 
+    
     ! generate interpolation weights / values    
     call g3dv_mpi_ij2grd_real(grid_local_mask, tmp2d)
     if(isroot) then
-       i1 = obs_num       
-       do i = obs_num, 1, -1
+       i1 = 0       
+       do i = 1, obs_num
+          if(obs_qc(i) >0 )cycle
+          
           ! generate interpolation weights          
           obs(i)%grd_w = grid_genweights(obs(i)%lat, obs(i)%lon, obs(i)%dpth)
 
           ! remove obs where interpolation weights place it on land
           ! TODO, fix the gen_weights function so this never happens
           if(tmp2d(obs(i)%grd_w%x(1), obs(i)%grd_w%y(1)) < 1) then
-             obs(i) = obs(obs_num)
-             obs_num = obs_num - 1
-             cycle
+             obs_qc(i) = 20
+             i1 = i1 + 1
           end if
        end do
-       print *, (i1-obs_num), " removed for ON LAND"
+       print *, i1, " removed for ON LAND"
     end if
     
 
@@ -365,22 +380,23 @@ contains
     call g3dv_mpi_ij2grd_real(grid_local_D, tmp2d)
     if (isroot) then
        !TODO, this check should really be done in the obsop
-       i1 = obs_num
-       do i = obs_num, 1, -1          
+       i1 = 0
+       do i = 1, obs_num
+          if(obs_qc(i)>0)cycle
           if(grid_dpth(obs(i)%grd_w%z) >= tmp2d(obs(i)%grd_w%x(1),obs(i)%grd_w%y(1))) then
-             obs(i) = obs(obs_num)
-             obs_num = obs_num - 1
+             obs_qc(i) = 21
+             i1 = i1 + 1
           end if
        end do
-       print *, (i1-obs_num), " removed for BELOW MODEL DEPTH"
-       i1 = obs_num
+       print *, i1, " removed for BELOW MODEL DEPTH"
     end if 
 
 
-    ! SSH 
+    ! SSH
     call g3dv_mpi_ij2grd_real(grid_local_ssh, tmp2d)
     if (isroot) then
        do i = 1, obs_num
+          if(obs_qc(i) >0) cycle
           obs(i)%grd_ssh = grid_interp2d(tmp2d, obs(i)%grd_w)
        end do
     end if
@@ -394,6 +410,7 @@ contains
     end do
     if(isroot) then
        do i = 1, obs_num
+          if(obs_qc(i) >0) cycle
           obs(i)%grd_vtloc = grid_interp3d(tmp3d, obs(i)%grd_w)
        end do
     end if
@@ -402,6 +419,7 @@ contains
     call g3dv_mpi_ij2grd_real(grid_local_coastdist, tmp2d)
     if (isroot) then
        do i = 1, obs_num
+          if(obs_qc(i) >0) cycle          
           obs(i)%grd_coast = grid_interp2d(tmp2d, obs(i)%grd_w)
        end do
     end if 
@@ -417,6 +435,7 @@ contains
     end do
     if(isroot) then
        do i = 1, obs_num
+          if(obs_qc(i) >0) cycle
           if(obs(i)%id /= obs_id_t) cycle
           obs(i)%grd_var = grid_interp3d(tmp3d, obs(i)%grd_w)
        end do
@@ -430,12 +449,43 @@ contains
     end do
     if(isroot) then
        do i = 1, obs_num
+          if(obs_qc(i) >0) cycle         
           if(obs(i)%id /= obs_id_s) cycle
           obs(i)%grd_var = grid_interp3d(tmp3d, obs(i)%grd_w)
        end do
     end if
 
 
+    ! do final QC checks
+    !------------------------------------------------------------
+    i1 = 0
+    if(isroot) then
+       do i=1,obs_num
+          if(obs_qc(i) >0) cycle
+          if( abs(obs(i)%inc) > qc_max*obs(i)%grd_var) then
+             obs_qc(i) = 30
+             i1 = i1 + 1
+          end if
+       end do
+       print *, i1, " removed for FAIL BGVARSTDEV QC"
+    end if
+
+    
+    !TODO, save the obs file
+!    if(root) then
+!       call obsio_class%write("obsout.nc", obs, obs_qc)
+!    end if
+
+    
+    ! remove all bad obs
+    do i=obs_num,1,-1
+       if (obs_qc(i) > 0) then
+          obs(i) = obs(obs_num)
+          obs_num = obs_num - 1
+       end if
+    end do
+    
+    
     ! other stats to print
     !------------------------------
     if(isroot) then

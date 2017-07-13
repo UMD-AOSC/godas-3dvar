@@ -348,6 +348,7 @@ contains
 
     end do
 
+    if(isroot) print *, "Final convergence ratio: ", resid0/resid
     call timer_stop(timer_pcg)
 
 

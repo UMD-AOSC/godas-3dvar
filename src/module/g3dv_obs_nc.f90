@@ -36,10 +36,11 @@ contains
 
 
 
-  subroutine obsio_nc_write(self, file, obs)
+  subroutine obsio_nc_write(self, file, obs, obs_qc)
     class(obsio_nc) :: self
     character(len=*),  intent(in)  :: file
     type(observation), intent(in)  :: obs(:)
+    integer, intent(in) :: obs_qc(:)
 
     self%i = self%i
     if(size(obs) == size(obs)) continue

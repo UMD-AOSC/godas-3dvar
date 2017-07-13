@@ -205,7 +205,9 @@ contains
        ! ignore comments
        line = adjustl(line)
        if (line(1:1) == '#') cycle
+       if (line(1:1) == '!') cycle
 
+       
        ! ignore empty lines
        if (len(trim(adjustl(line))) == 0) cycle
 
