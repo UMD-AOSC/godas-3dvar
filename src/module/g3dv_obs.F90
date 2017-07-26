@@ -95,6 +95,7 @@ module g3dv_obs
      procedure(I_obsio_getstr), deferred :: get_name
      procedure(I_obsio_getstr), deferred :: get_desc
      procedure(I_obsio_write),  deferred :: write
+     procedure(I_obsio_writeqc),deferred :: writeqc
      procedure(I_obsio_read),   deferred :: read
   end type obsio
   abstract interface
@@ -115,6 +116,12 @@ module g3dv_obs
        type(observation), intent(in) :: obs(:)
        integer, intent(in) :: obs_qc(:)
      end subroutine I_obsio_write
+     subroutine I_obsio_writeqc(self, file, obs_qc)
+       import obsio
+       class(obsio) :: self
+       character(len=*), intent(in) :: file
+       integer, intent(in) :: obs_qc(:)
+     end subroutine I_obsio_writeqc
      subroutine I_obsio_read(self, file, obs)
        import obsio
        import observation
@@ -472,9 +479,10 @@ contains
 
     
     !TODO, save the obs file
-!    if(root) then
-!       call obsio_class%write("obsout.nc", obs, obs_qc)
-!    end if
+    ! for now just saving the qc flag
+    if(root) then
+        call obsio_class%writeqc("obs.varqc.nc", obs_qc)
+    end if
 
     
     ! remove all bad obs

@@ -11,6 +11,7 @@ module g3dv_obs_nc
      procedure :: get_name  => obsio_get_name
      procedure :: get_desc  => obsio_get_desc
      procedure :: write     => obsio_nc_write
+     procedure :: writeqc   => obsio_nc_writeqc
      procedure :: read      => obsio_nc_read
   end type obsio_nc
 
@@ -50,6 +51,24 @@ contains
 
     stop 1
   end subroutine obsio_nc_write
+
+
+  subroutine obsio_nc_writeqc(self, file, obs_qc)
+    class(obsio_nc) :: self
+    character(len=*),  intent(in) :: file
+    integer,           intent(in) :: obs_qc(:)
+
+    integer :: ncid, dimid, varid
+
+    call check( nf90_create(file, nf90_clobber, ncid))
+    call check( nf90_def_dim(ncid, "obs", nf90_unlimited, dimid))
+    call check( nf90_def_var(ncid, "qc",  nf90_int, dimid, varid))
+    call check( nf90_put_att(ncid, varid, "descrtiption", "quality control flag returned  by 3dvar"))
+    call check( nf90_enddef(ncid))
+    call check( nf90_put_var(ncid,varid, obs_qc))
+    call check( nf90_close(ncid))   
+  end subroutine obsio_nc_writeqc
+
 
 
   subroutine obsio_nc_read(self, file, obs)

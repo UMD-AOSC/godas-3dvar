@@ -10,6 +10,7 @@ module g3dv_obs_dat
      procedure :: get_name  => obsio_get_name
      procedure :: get_desc  => obsio_get_desc
      procedure :: write     => obsio_dat_write
+     procedure :: writeqc   => obsio_dat_writeqc
      procedure :: read      => obsio_dat_read
   end type obsio_dat
 
@@ -50,6 +51,13 @@ contains
     stop 1
   end subroutine obsio_dat_write
 
+  subroutine obsio_dat_writeqc(self, file, obs_qc)
+    class(obsio_dat) :: self
+    character(len=*), intent(in) :: file
+    integer,          intent(in) :: obs_qc(:)
+    print *, "obsio_dat_write_qc Not yet implemented "
+    stop 1
+  end subroutine obsio_dat_writeqc
 
   subroutine obsio_dat_read(self, file, obs)
     class(obsio_dat) :: self
