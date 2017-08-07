@@ -26,6 +26,7 @@ module g3dv_mpi
 
   public :: g3dv_mpi_bcstflag
   public :: g3dv_mpi_grd2ij_real
+  public :: g3dv_mpi_grd2ij_int  
   public :: g3dv_mpi_ij2grd_real
 
 
@@ -216,6 +217,37 @@ contains
   end subroutine g3dv_mpi_grd2ij_real
 
 
+
+  !================================================================================
+  !================================================================================
+
+
+
+  subroutine g3dv_mpi_grd2ij_int(grd, ij)
+    !! takes a single grid on the root process and distributes portions of it to 
+    !! worker processes
+
+    integer, intent(in) :: grd(grid_nx*grid_ny)
+    integer, intent(inout) :: ij(g3dv_mpi_ijcount)
+
+    integer :: ierr, i, j 
+    integer :: wrk(grid_nx*grid_ny)
+
+    if (.not. interleave) then
+       call mpi_scatterv(grd, scatterv_count, scatterv_displ, mpi_int, &
+            ij, g3dv_mpi_ijcount, mpi_int, g3dv_mpi_root, g3dv_mpi_comm, ierr)
+    else
+       if (g3dv_mpi_isroot) then
+          do i = 1, g3dv_mpi_size
+             do j = 1, scatterv_count(i)
+                wrk(scatterv_displ(i)+j) = grd((j-1)*g3dv_mpi_size+i)
+             end do
+          end do
+       end if
+       call mpi_scatterv(wrk, scatterv_count, scatterv_displ, mpi_int, &
+            ij, g3dv_mpi_ijcount, mpi_int, g3dv_mpi_root, g3dv_mpi_comm, ierr)
+    end if
+  end subroutine g3dv_mpi_grd2ij_int
 
   !================================================================================
   !================================================================================

@@ -42,7 +42,7 @@ module g3dv_bgcov
   real :: hz_loc(2) = -1
   real :: vt_loc_max = -1
   real :: vt_loc_min = -1
-  real :: vt_loc_diff_scale = 2.0
+  real :: vt_loc_diff_scale = -1
   real :: time_loc = -1
   real :: tnsr_surf  = -1.0   ! surface (SSH) gradient tensor
   real :: tnsr_coast_dist = -1.0       ! coast gradient tensor
@@ -220,8 +220,11 @@ contains
     ! BUT, this is also modulated by a function of the difference of the two vt_locs.
     ! It makes the algorithm stable... trust me
     vt_cor = loc(abs(ob1%dpth-ob2%dpth),  (ob1%grd_vtloc+ob2%grd_vtloc)/2.0)
-    vt_cor = vt_cor *&
-         loc(abs(ob1%grd_vtloc-ob2%grd_vtloc), (ob1%grd_vtloc+ob2%grd_vtloc)/(2.0*vt_loc_diff_scale))
+    !TODO: remove this part? it was only needed before vtloc smoothing was done
+    if(vt_loc_diff_scale > 0) then
+       vt_cor = vt_cor *&
+            loc(abs(ob1%grd_vtloc-ob2%grd_vtloc), (ob1%grd_vtloc+ob2%grd_vtloc)/(2.0*vt_loc_diff_scale))
+    end if
     if(vt_cor <= 0) return
     
     ! horizontal localization
@@ -291,8 +294,13 @@ contains
     do i = 1, grid_nz
        if(bgcov_local_vtloc(i,ij) <= 0.0) exit
        r = loc(abs(grid_dpth(i)-ob%dpth),  (ob%grd_vtloc+bgcov_local_vtloc(i,ij))/2.0)
-       r = r * loc(abs(ob%grd_vtloc-bgcov_local_vtloc(i,ij)), &
-            (ob%grd_vtloc+bgcov_local_vtloc(i,ij))/(2.0*vt_loc_diff_scale))
+
+       !TODO: remove this part? it was only needed before vtloc smoothing was d
+       if(vt_loc_diff_scale > 0) then
+          r = r * loc(abs(ob%grd_vtloc-bgcov_local_vtloc(i,ij)), &
+               (ob%grd_vtloc+bgcov_local_vtloc(i,ij))/(2.0*vt_loc_diff_scale))
+       end if
+       
        vt_cor(i) = r
     end do
     
