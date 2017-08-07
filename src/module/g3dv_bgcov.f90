@@ -40,10 +40,8 @@ module g3dv_bgcov
   
   ! variables read in from namelist
   real :: hz_loc(2) = -1
-  real :: vt_loc = 0.15
   real :: vt_loc_max = -1
   real :: vt_loc_min = -1
-  real :: vt_loc_pow = 1
   real :: vt_loc_diff_scale = 2.0
   real :: time_loc = -1
   real :: tnsr_surf  = -1.0   ! surface (SSH) gradient tensor
@@ -71,15 +69,14 @@ contains
     logical, intent(in) :: isroot
     character(len=*), intent(in) :: nml
 
-    integer :: unit, i, z
-    integer ::  btm_lvl
+    integer :: unit, i
     real :: r
 
     integer :: timer
     real, allocatable :: tmp3d(:,:,:)
     real, allocatable :: tmpij(:)
 
-    namelist /g3dv_bgcov/ hz_loc, hz_loc_scale, vt_loc, vt_loc_min, vt_loc_max, vt_loc_pow,&
+    namelist /g3dv_bgcov/ hz_loc, hz_loc_scale, vt_loc_min, vt_loc_max,&
          vt_loc_diff_scale, time_loc, tnsr_surf, tnsr_coast_dist, tnsr_coast_min, bgvar_t, bgvar_s
 
 
@@ -96,6 +93,12 @@ contains
     close(unit)
     if(isroot) print g3dv_bgcov
 
+    
+    ! initialize some variables
+    allocate(tmpij(g3dv_mpi_ijcount))
+
+    
+    ! determine horizontal correlation lengths
     if(isroot) then
        print *, ""
        print *, " Horizontal correlation length scales summary:"
@@ -108,32 +111,28 @@ contains
     end if
 
 
-    ! Compute vertical localization distance field
+
+    ! load vertical localization distance field
     ! ------------------------------------------------------------
     timer = timer_init(" bgcov_vtloc", TIMER_SYNC)
     call timer_start(timer)
 
+
     if(isroot) then
        print *,""
-       print *, "Calculating vertical localization values..."
+       print *, "Loading vertical localization values..."
     end if
     allocate(bgcov_local_vtloc(grid_nz, g3dv_mpi_ijcount))
     bgcov_local_vtloc = 0.0
-    do i = 1, g3dv_mpi_ijcount
-       if(grid_local_mask(i) <= 0.0) cycle
-
-       ! find the bottom level
-       do z = 1, grid_nz
-          if(grid_dpth(z) > grid_local_D(i)) then
-             btm_lvl = z - 1
-             exit
-          end if
-       end do
-       ! calculate vertical localization distances
-       bgcov_local_vtloc(1:btm_lvl, i) = col_vtloc(&
-            grid_local_dens(1:btm_lvl, i), grid_dpth(1:btm_lvl))
+    if(isroot) then
+       allocate(tmp3d(grid_nx, grid_ny, grid_nz))       
+       call datatable_get('vtloc', tmp3d)
+    end if
+    do i=1,grid_nz
+       call g3dv_mpi_grd2ij_real(tmp3d(:,:,i), tmpij)
+       bgcov_local_vtloc(i,:) = tmpij
     end do
-
+    
     
     ! Load the background error variance
     !------------------------------------------------------------
@@ -149,11 +148,7 @@ contains
        bgcov_local_var_t = bgvar_t
        if(isroot) print *, "Using fixed TEMP bg err var: ", bgvar_t
     else
-       allocate(tmpij(g3dv_mpi_ijcount))
-       if(isroot) then
-          allocate(tmp3d(grid_nx, grid_ny, grid_nz))
-          call datatable_get('bgvar_t', tmp3d)
-       end if
+       if(isroot)  call datatable_get('bgvar_t', tmp3d)
        do i = 1, grid_nz
           call g3dv_mpi_grd2ij_real(tmp3d(:,:,i), tmpij)
           bgcov_local_var_t(i, :) = tmpij
@@ -165,22 +160,16 @@ contains
        bgcov_local_var_s = bgvar_s
        if(isroot) print *, "Using fixed SALT bg err var: ", bgvar_s
     else
-       if(.not. allocated(tmpij)) allocate(tmpij(g3dv_mpi_ijcount))
-       if(isroot) then
-          if(.not. allocated(tmp3d)) allocate(tmp3d(grid_nx, grid_ny, grid_nz))
-          call datatable_get('bgvar_s', tmp3d)
-       end if
+       if(isroot) call datatable_get('bgvar_s', tmp3d)
        do i = 1, grid_nz
           call g3dv_mpi_grd2ij_real(tmp3d(:,:,i), tmpij)
           bgcov_local_var_s(i,:) = tmpij
        end do
     end if
 
-    if(allocated(tmp3d)) then
-       deallocate(tmp3d)
-       deallocate(tmpij)
-    end if
-    
+    if(allocated(tmp3d)) deallocate(tmp3d)
+    deallocate(tmpij)
+   
 
 
     ! TODO, density is no longer needed, have the grid module delete that data
@@ -191,142 +180,6 @@ contains
   end subroutine bgcov_init
 
 
-  
-  !================================================================================
-  !================================================================================
-
-
-  
-  function col_vtloc(dens, dpth) result(vtloc)
-    real, intent(in) :: dens(:)
-    real, intent(in) :: dpth(:)
-    real :: vtloc(size(dens))
-
-    real :: r
-    real :: loc_u(size(dens))
-    real :: loc_d(size(dens))
-    
-    integer :: z, z1, z2
-
-    vtloc = 0.0
-
-    !TODO, currently uses linear interpolation, should switch to cubic spline
-
-    
-    ! initial pass through the column
-    ! to determine localization distances in the up/down directions
-    !------------------------------
-    loc_u = -1
-    loc_d = -1
-    do z = 1, size(dens)
-       ! calculate UPWARD localization distance
-       do z2 = z-1, 1 ,-1          
-          if(dens(z)-dens(z2) >= vt_loc) then
-             loc_u(z) = dpth(z) - dpth(z2+1) - &
-                  (dens(z) - vt_loc-dens(z2+1))&
-                  * (dpth(z2) - dpth(z2+1)) &
-                  / (dens(z2) - dens(z2+1))
-             r = (dpth(z)-dpth(z-1))
-             if(loc_u(z) <  r) loc_u(z) = r
-             exit
-          end if
-       end do
-       
-       ! calculate DOWNWARD localization distance
-       do z2 = z+1, size(dens)
-          if(dens(z2)-dens(z) >= vt_loc) then
-             loc_d(z) = -dpth(z) + dpth(z2-1) + &
-                  (dens(z) + vt_loc-dens(z2-1))&
-                  * (dpth(z2) - dpth(z2-1)) &
-                  / (dens(z2) - dens(z2-1))
-             r = (dpth(z+1)-dpth(z))
-             if(loc_d(z) <  r) loc_d(z) = r
-             exit
-          end if
-       end do       
-    end do
-
-    
-  
-    ! set the lengths at the top/bottom boundary
-    loc_u(1) = loc_d(1)
-    loc_d(size(dens)) = loc_u(size(dens))
-
-    
-    ! for shallow/stable layers that have no localization lengths set at all:
-    if(loc_d(1) < 0 .or. loc_u(size(dens)) < 0) then
-       loc_d(1) = dpth(size(dens))*sqrt(0.3)/2.0
-       loc_u(1) = loc_d(1)
-       loc_u(size(dens)) = dpth(size(dens))*sqrt(0.3)/2.0
-       loc_d(size(dens)) = loc_u(size(dens))
-!       loc_d = dpth(size(dens))*sqrt(0.3)/2.0
-!       loc_u = dpth(size(dens))*sqrt(0.3)/2.0
-    end if
-
-    
-    ! clip to some min/max value
-    if(vt_loc_max > 0) then
-       loc_u = min(loc_u, vt_loc_max)
-       loc_d = min(loc_d, vt_loc_max)
-    end if
-    if(vt_loc_min > 0) then
-       where(loc_u > 0) loc_u = max(loc_u, vt_loc_min)
-       where(loc_d > 0) loc_d = max(loc_d, vt_loc_min)
-    end if
-    
-
-    
-    ! fill in gaps
-    !------------------------------
-
-    ! upward lengths
-    z1 = -1
-    do z2 = 2, size(dens)
-       if(loc_u(z2) > 0) then
-          z1 = z2
-          exit
-       end if
-    end do
-    if(z1 > 2) then
-       do z=2,z1-1
-          loc_u(z) = loc_u(1) + &
-               (dpth(z) - dpth(1)) &
-               * (loc_u(z1) - loc_u(1))&
-               / (dpth(z1) - dpth(1))
-       end do
-    end if
-
-    
-    ! downward lengths
-    z1 = size(dens)+1
-    do z2 = size(dens)-1, 1, -1
-       if(loc_d(z2) > 0) then
-          z1 = z2
-          exit
-       end if
-    end do
-    if(z1 < size(dens) - 1) then
-       do z = z1+1, size(dens)-1
-          loc_d(z) = loc_d(size(dens)) + &
-               (dpth(z) - dpth(size(dens))) &
-               * (loc_d(z1) - loc_d(size(dens))) &
-               / (dpth(z1) - dpth(size(dens)))
-       end do
-    end if
-
-    ! any small gaps remaining are due to density decreasing slightly with depth
-    ! just fill these in with the previous level's value
-    do z = 2, size(dens)       
-       if(loc_u(z) <= 0) loc_u(z) = loc_u(z-1)
-       if(loc_d(z) <= 0) loc_d(z) = loc_d(z-1)
-    end do
-    
-    ! calculate the final correlation lengths
-    vtloc = (loc_u * loc_d * min(loc_u,loc_d)**vt_loc_pow)**(1/(2.0+vt_loc_pow))
-    
-  end function col_vtloc
-
-  
   
   !================================================================================
   !================================================================================

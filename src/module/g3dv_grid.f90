@@ -60,10 +60,7 @@ module g3dv_grid
   real, public, protected, allocatable :: grid_local_mask(:)
   real, public, protected, allocatable :: grid_local_ssh(:) 
   real, public, protected, allocatable :: grid_local_coastdist(:) 
-  real, public, protected, allocatable :: grid_local_dens(:,:)
   real, public, protected, allocatable :: grid_local_D(:)
-
-!  real, public, allocatable :: grid_local_diag3D_2(:,:)
 
 
 
@@ -187,7 +184,6 @@ contains
     allocate(grid_local_D(g3dv_mpi_ijcount))
     allocate(grid_local_ssh(g3dv_mpi_ijcount))
     allocate(grid_local_coastdist(g3dv_mpi_ijcount))    
-    allocate(grid_local_dens(grid_nz, g3dv_mpi_ijcount))
 !    allocate(grid_local_diag3D_2(grid_ns, g3dv_mpi_ijcount))
     allocate(tmpij(g3dv_mpi_ijcount))
     if(isroot) then
@@ -253,7 +249,8 @@ contains
        call datatable_get('grid_coast', tmp2d)
     end if
     call g3dv_mpi_grd2ij_real(tmp2d, grid_local_coastdist)
-       
+
+    
     ! generate kd-tree for fast lookup of grid points given a lat/lon
     !------------------------------
     if(isroot) then
@@ -288,19 +285,7 @@ contains
        call datatable_get('bg_ssh', tmp2d)
     end if
     call g3dv_mpi_grd2ij_real(tmp2d, grid_local_ssh)
-
     
-    ! density
-    ! TODO, save on memory by reading in a 2d slice at a time and
-    ! scattering immediately?
-    if(isroot) then
-       call datatable_get('bg_dens',tmp3d)
-    end if
-    do i = 1, grid_nz
-       call g3dv_mpi_grd2ij_real(tmp3d(:,:,i), tmpij)
-       grid_local_dens(i,:) = tmpij
-    end do
-
 
     ! done, cleanup
     !------------------------------------------------------------

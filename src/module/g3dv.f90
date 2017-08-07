@@ -159,7 +159,7 @@ contains
     integer :: d_x, d_y, d_z
     integer :: v_x, v_y, v_z
     integer :: v_ai_t, v_ai_s
-    integer :: v_vtloc, v_maxobcor_t, v_maxobcor_s
+    integer :: v_maxobcor_t, v_maxobcor_s
 
     real, allocatable :: tmp2d(:,:)
     real, allocatable :: tmp3d(:,:,:)
@@ -188,7 +188,6 @@ contains
        call check(nf90_def_var(ncid, "ai_salt", nf90_real, (/d_x, d_y, d_z/), v_ai_s))
 
        ! other optional diagnostics
-       call check(nf90_def_var(ncid, "vtloc_dist", nf90_real, (/d_x, d_y, d_z/), v_vtloc))
        call check(nf90_def_var(ncid, "maxobcorr_t", nf90_real, (/d_x, d_y, d_z/), v_maxobcor_t))
        call check(nf90_def_var(ncid, "maxobcorr_s", nf90_real, (/d_x, d_y, d_z/), v_maxobcor_s))
        
@@ -243,12 +242,6 @@ contains
     end do
     if(isroot) call check(nf90_put_var(ncid, v_maxobcor_s, tmp3d))
 
-    !vt localization distance
-    do i = 1, grid_nz
-       tmpij = bgcov_local_vtloc(i,:)
-       call g3dv_mpi_ij2grd_real(tmpij, tmp3d(:,:,i))
-    end do
-    if(isroot) call check(nf90_put_var(ncid, v_vtloc, tmp3d))
 
     ! all done, cleanup
     if(isroot) then
