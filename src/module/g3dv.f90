@@ -82,7 +82,7 @@ contains
     end if
 
      ! initialize grid / state variables
-     call datatable_init(isroot, 'data_table.3dvar')
+     call datatable_init(isroot, 'datatable.3dvar')
      call grid_init(isroot, nml_filename)
     
     

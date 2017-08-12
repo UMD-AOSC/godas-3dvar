@@ -76,7 +76,9 @@ contains
     real, allocatable :: tmp3d(:,:,:)
     real, allocatable :: tmpij(:)
 
-    namelist /g3dv_bgcov/ hz_loc, hz_loc_scale, vt_loc_min, vt_loc_max,&
+    namelist /g3dv_hzloc/ hz_loc, hz_loc_scale
+
+    namelist /g3dv_bgcov/ vt_loc_min, vt_loc_max,&
          vt_loc_diff_scale, time_loc, tnsr_surf, tnsr_coast_dist, tnsr_coast_min, bgvar_t, bgvar_s
 
 
@@ -90,7 +92,10 @@ contains
     !read in our section of the namelist
     open(newunit=unit, file=nml)
     read(unit, nml=g3dv_bgcov)
+    rewind(unit)
+    read(unit, nml=g3dv_hzloc)
     close(unit)
+    if(isroot) print g3dv_hzloc
     if(isroot) print g3dv_bgcov
 
     

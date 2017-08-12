@@ -144,7 +144,7 @@ contains
     end do
 
     if (j == 0) then
-       print *, 'ERROR: "',trim(key),'" not found in data_table'
+       print *, 'ERROR: "',trim(key),'" not found in datatable'
        stop 1
     end if
 
