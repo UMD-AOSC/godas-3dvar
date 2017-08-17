@@ -197,7 +197,7 @@ contains
     real, optional, intent(in) :: dist
     real :: cov
 
-    real :: dist0, r
+    real :: dist0, r, vtloc_d
     real :: hz_cor, vt_cor, time_cor, surf_tensor, coast_tensor
 
     cov = 0.0
@@ -222,20 +222,22 @@ contains
 
 
     ! vertical localization distance is the average of vt_loc of the two points 
+    vtloc_d = sqrt(ob1%grd_vtloc*ob2%grd_vtloc)
+!    vtloc_d = (ob1%grd_vtloc+ob2%grd_vtloc)/2.0
+    vt_cor = loc(abs(ob1%dpth-ob2%dpth),  vtloc_d)
 
-!    !TODO: remove this part? it was only needed before vtloc smoothing was done
-!    ! BUT, this is also modulated by a function of the difference of the two vt_locs.
-!    ! It makes the algorithm stable... trust me
-!    vt_cor = loc(abs(ob1%dpth-ob2%dpth),  (ob1%grd_vtloc+ob2%grd_vtloc)/2.0)
-!    if(vt_loc_diff_scale > 0) then
-!       vt_cor = vt_cor *&
-!            loc(abs(ob1%grd_vtloc-ob2%grd_vtloc), (ob1%grd_vtloc+ob2%grd_vtloc)/(2.0*vt_loc_diff_scale))
-!    end if
-    vt_cor = loc(abs(ob1%dpth-ob2%dpth),  sqrt((ob1%grd_vtloc*ob2%grd_vtloc)))
+    !TODO: remove this part? it was probably only needed before vtloc smoothing was done.
+    ! vtloc changing too much over a short hz/vt distance can cause the covariance matrix to
+    ! not be positive definite, and cholesky decomp will fail. This modulates the vt_cor
+    ! by a function of the difference of the two vt_locs.
+    if(vt_loc_diff_scale > 0) then
+       vt_cor = vt_cor * loc(abs(ob1%grd_vtloc-ob2%grd_vtloc), vtloc_d*vt_loc_diff_scale)
+    end if
     if(vt_cor <= 0) return
     
     ! horizontal localization
     hz_cor = loc(dist0, (bgcov_hzdist(ob1%lat)+ bgcov_hzdist(ob2%lat))/2.0)
+    if(hz_cor <= 0) return
 
     ! temporal localization
     time_cor = merge( &
@@ -275,6 +277,7 @@ contains
     real,    intent(out) :: cor(grid_ns), var(grid_ns)
 
     real :: hz_cor, time_cor, surf_tensor, coast_tensor, vt_cor(grid_nz)
+    real :: vtloc_d
 
     integer :: i, idx_start
     real :: r
@@ -298,17 +301,18 @@ contains
     vt_cor = 0.0    
     do i = 1, grid_nz
        if(bgcov_local_vtloc(i,ij) <= 0.0) exit
-       vt_cor(i) = loc(abs(grid_dpth(i)-ob%dpth),  sqrt(ob%grd_vtloc*bgcov_local_vtloc(i,ij)))
+       vtloc_d=sqrt(ob%grd_vtloc*bgcov_local_vtloc(i,ij))
+!       vtloc_d=(ob%grd_vtloc+bgcov_local_vtloc(i,ij))/2.0
+       r = loc(abs(grid_dpth(i)-ob%dpth),  vtloc_d)
 
-!       !TODO: remove this part? it was only needed before vtloc smoothing was d
-!    ! BUT, this is also modulated by a function of the difference of the two vt_locs.
-!    ! It makes the algorithm stable... trust me
-!       r = loc(abs(grid_dpth(i)-ob%dpth),  (ob%grd_vtloc+bgcov_local_vtloc(i,ij))/2.0)
-!       if(vt_loc_diff_scale > 0) then
-!          r = r * loc(abs(ob%grd_vtloc-bgcov_local_vtloc(i,ij)), &
-!               (ob%grd_vtloc+bgcov_local_vtloc(i,ij))/(2.0*vt_loc_diff_scale))
-!       end if      
-!       vt_cor(i) = r
+       !TODO: remove this part? it was probably only needed before vtloc smoothing was done.
+       ! vtloc changing too much over a short hz/vt distance can cause the covariance matrix to
+       ! not be positive definite, and cholesky decomp will fail. This modulates the vt_cor
+       ! by a function of the difference of the two vt_locs.
+       if(vt_loc_diff_scale > 0) then
+          r = r * loc(abs(ob%grd_vtloc-bgcov_local_vtloc(i,ij)), vtloc_d*vt_loc_diff_scale)
+       end if      
+       vt_cor(i) = r
     end do
     
      
