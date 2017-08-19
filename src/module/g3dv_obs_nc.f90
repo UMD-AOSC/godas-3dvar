@@ -92,7 +92,7 @@ contains
     call check(nf90_inq_varid(ncid, "lon",   vid_lon))
     call check(nf90_inq_varid(ncid, "lat",   vid_lat))
     call check(nf90_inq_varid(ncid, "depth", vid_depth))
-    call check(nf90_inq_varid(ncid, "val",   vid_inc))
+    call check(nf90_inq_varid(ncid, "inc",   vid_inc))
     call check(nf90_inq_varid(ncid, "err",   vid_err))
     call check(nf90_inq_varid(ncid, "hr",   vid_hr))
 
