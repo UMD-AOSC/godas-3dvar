@@ -300,7 +300,9 @@ contains
              ! accelerate this segment
              ! find nearby points
              call timer_start(timer_obsearch_HBH)
-             r = bgcov_hzdist(obs(j)%lat)*1.1 * 2.0/sqrt(0.3) ! expanded by 10% to account for point
+	     ! TODO, determien the best search radius
+             r = (bgcov_hzdist(obs(j)%lat)+bgcov_hzdist(0.0))/2.0 * 2.0/sqrt(0.3)
+!             r = bgcov_hzdist(obs(j)%lat)*1.1 * 2.0/sqrt(0.3) ! expanded by 10% to account for point
               ! with small radius in range of point with larger radius
              call obs_search(obs(j)%lat, obs(j)%lon, r,&
                   obs_points, obs_dist, num)
@@ -371,9 +373,9 @@ contains
        if (grid_local_mask(i) <= 0) cycle
 
        ! find all nearby observations 
-       ! TODO use actual localization values
        call timer_start(timer_obsearch_BH)       
-       r = bgcov_hzdist(grid_local_lat(i)) * 2.0/sqrt(0.3)
+       ! TODO, use a more constrained search radius
+       r = (bgcov_hzdist(grid_local_lat(i))+bgcov_hzdist(0.0))/2.0 * 2.0/sqrt(0.3)
        call obs_search(grid_local_lat(i), grid_local_lon(i), r, &
             obs_points, obs_dist, num)
        call timer_stop(timer_obsearch_BH)

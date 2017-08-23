@@ -205,7 +205,14 @@ contains
     ! univariate for now
     if (ob1%id /= ob2%id) return
 
-    
+
+    ! gradient tensor localizations
+    surf_tensor   = merge( &
+                loc(abs(ob1%grd_ssh - ob2%grd_ssh), tnsr_surf),&
+                1.0, tnsr_surf > 0.0)
+    if(surf_tensor <= 0) return
+   
+
     !calculate distance if it hasn't been given
     ! TODO, move this outside the function to prevent
     ! accidentally calling without a distance, which is slower.
@@ -220,11 +227,16 @@ contains
        dist0 = re*acos(r)
     end if
 
+    ! horizontal localization
+    hz_cor = loc(dist0, (bgcov_hzdist(ob1%lat)+ bgcov_hzdist(ob2%lat))/2.0)
+    if(hz_cor <= 0) return
+
 
     ! vertical localization distance is the average of vt_loc of the two points 
     vtloc_d = sqrt(ob1%grd_vtloc*ob2%grd_vtloc)
 !    vtloc_d = (ob1%grd_vtloc+ob2%grd_vtloc)/2.0
     vt_cor = loc(abs(ob1%dpth-ob2%dpth),  vtloc_d)
+
 
     !TODO: remove this part? it was probably only needed before vtloc smoothing was done.
     ! vtloc changing too much over a short hz/vt distance can cause the covariance matrix to
@@ -234,21 +246,15 @@ contains
        vt_cor = vt_cor * loc(abs(ob1%grd_vtloc-ob2%grd_vtloc), vtloc_d*vt_loc_diff_scale)
     end if
     if(vt_cor <= 0) return
-    
-    ! horizontal localization
-    hz_cor = loc(dist0, (bgcov_hzdist(ob1%lat)+ bgcov_hzdist(ob2%lat))/2.0)
-    if(hz_cor <= 0) return
+
 
     ! temporal localization
     time_cor = merge( &
                 loc(abs(ob1%hr - ob2%hr), time_loc),&
                 1.0, time_loc > 0.0)
 
-    ! gradient tensor localizations
-    surf_tensor   = merge( &
-                loc(abs(ob1%grd_ssh - ob2%grd_ssh), tnsr_surf),&
-                1.0, tnsr_surf > 0.0)
 
+    ! coast distance tensor
     coast_tensor = merge( &
         max(tnsr_coast_min, &
            1.0 - abs( min(ob1%grd_coast, tnsr_coast_dist) - &
@@ -283,18 +289,20 @@ contains
     real :: r
 
 
-    ! univariate correlation for now
-    if(ob%id == obs_id_t) then       
-       idx_start = grid_var_t
-    else if(ob%id == obs_id_s) then
-       idx_start = grid_var_s
-    else
-       cor =0
-       var = 0
-       return
-    end if
     cor = 0.0
-    cor(idx_start:idx_start+grid_nz-1) = 1.0
+    var = 0.0
+
+
+    ! gradient tensor localizations
+    surf_tensor = merge( &
+               loc(abs(ob%grd_ssh - grid_local_ssh(ij)), tnsr_surf),&
+               1.0, tnsr_surf > 0.0)
+    if(surf_tensor <= 0.0) return
+
+
+    ! horizontal localization    
+    hz_cor = loc(dist, (bgcov_hzdist(grid_local_lat(ij))+ bgcov_hzdist(ob%lat))/2.0)
+    if (hz_cor <= 0.0) return
 
 
     ! vertical localization distance is the average of vt_loc of the two points 
@@ -315,15 +323,6 @@ contains
        vt_cor(i) = r
     end do
     
-     
-    !variance 
-    var(grid_var_t:grid_var_t+grid_nz-1) = bgcov_local_var_t(:,ij)*ob%grd_var
-    var(grid_var_s:grid_var_s+grid_nz-1) = bgcov_local_var_s(:,ij)*ob%grd_var
-
-
-    ! horizontal localization    
-    hz_cor = loc(dist, (bgcov_hzdist(grid_local_lat(ij))+ bgcov_hzdist(ob%lat))/2.0)
-
 
     ! temporal localization
     time_cor = merge( &
@@ -331,12 +330,7 @@ contains
                1.0, time_loc > 0.0)
 
 
-    ! gradient tensor localizations
-    surf_tensor = merge( &
-               loc(abs(ob%grd_ssh - grid_local_ssh(ij)), tnsr_surf),&
-               1.0, tnsr_surf > 0.0)
-
-
+    ! coast distance gradient tensor
     coast_tensor = merge( &
         max(tnsr_coast_min, &
            1.0 - abs( min(ob%grd_coast, tnsr_coast_dist) - &
@@ -344,6 +338,21 @@ contains
            / tnsr_coast_dist), &
         1.0, tnsr_coast_dist > 0.0)
 
+
+    !variance 
+    var(grid_var_t:grid_var_t+grid_nz-1) = bgcov_local_var_t(:,ij)*ob%grd_var
+    var(grid_var_s:grid_var_s+grid_nz-1) = bgcov_local_var_s(:,ij)*ob%grd_var
+
+
+    ! univariate correlation for now
+    if(ob%id == obs_id_t) then       
+       idx_start = grid_var_t
+    else if(ob%id == obs_id_s) then
+       idx_start = grid_var_s
+    else
+       return
+    end if
+    cor(idx_start:idx_start+grid_nz-1) = 1.0
 
     ! add up all the correlations
     cor(grid_var_t:grid_var_t+grid_nz-1) = cor(grid_var_t:grid_var_t+grid_nz-1) * vt_cor
