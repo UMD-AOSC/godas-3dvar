@@ -138,7 +138,7 @@ contains
     ! TODO, make output to file or retreival from  module API configurable
     timer_output = timer_init('(Output)', TIMER_SYNC)
     call timer_start(timer_output)
-    call write_output(local_ai, "output.nc")
+    call write_output(local_ai)
     call timer_stop(timer_output)
 
   end subroutine g3dv_run
@@ -150,12 +150,11 @@ contains
 
 
 
-  subroutine write_output(grd, filename)
+  subroutine write_output(grd)
     real, intent(in) :: grd(grid_ns, g3dv_mpi_ijcount)
-    character(len=*), intent(in) :: filename
 
     integer :: i
-    integer :: ncid
+    integer :: ncid1, ncid2
     integer :: d_x, d_y, d_z
     integer :: v_x, v_y, v_z
     integer :: v_ai_t, v_ai_s
@@ -168,31 +167,37 @@ contains
 
     ! setup the output file
     if(isroot) then
-       print*, 'Saving analysis grid to "', trim(filename), '"'
+       print*, 'Saving analysis increments'
 
-       call check(nf90_create(filename, NF90_WRITE, ncid))
-       
-       call check(nf90_def_dim(ncid, "grid_x", grid_nx, d_x))
-       call check(nf90_def_var(ncid, "grid_x", nf90_real, (/d_x/), v_x))
-       call check(nf90_put_att(ncid, v_x, "units", "degrees_east"))
-       
-       call check(nf90_def_dim(ncid, "grid_y", grid_ny, d_y))
-       call check(nf90_def_var(ncid, "grid_y", nf90_real, (/d_y/), v_y))
-       call check(nf90_put_att(ncid, v_y, "units", "degrees_north"))
-       
-       call check(nf90_def_dim(ncid, "grid_z", grid_nz, d_z))
-       call check(nf90_def_var(ncid, "grid_z", nf90_real, (/d_z/), v_z))
-       call check(nf90_put_att(ncid, v_z, "units", "meters"))
-
-       call check(nf90_def_var(ncid, "ai_temp", nf90_real, (/d_x, d_y, d_z/), v_ai_t))
-       call check(nf90_def_var(ncid, "ai_salt", nf90_real, (/d_x, d_y, d_z/), v_ai_s))
+       call check(nf90_create("ana_inc.nc", NF90_WRITE, ncid1))       
+       call check(nf90_def_dim(ncid1, "grid_x", grid_nx, d_x))
+       call check(nf90_def_var(ncid1, "grid_x", nf90_real, (/d_x/), v_x))
+       call check(nf90_put_att(ncid1, v_x, "units", "degrees_east"))
+       call check(nf90_def_dim(ncid1, "grid_y", grid_ny, d_y))
+       call check(nf90_def_var(ncid1, "grid_y", nf90_real, (/d_y/), v_y))
+       call check(nf90_put_att(ncid1, v_y, "units", "degrees_north"))
+       call check(nf90_def_dim(ncid1, "grid_z", grid_nz, d_z))
+       call check(nf90_def_var(ncid1, "grid_z", nf90_real, (/d_z/), v_z))
+       call check(nf90_put_att(ncid1, v_z, "units", "meters"))
+       call check(nf90_def_var(ncid1, "ai_temp", nf90_real, (/d_x, d_y, d_z/), v_ai_t))
+       call check(nf90_def_var(ncid1, "ai_salt", nf90_real, (/d_x, d_y, d_z/), v_ai_s))
+       call check(nf90_enddef(ncid1))
 
        ! other optional diagnostics
-       call check(nf90_def_var(ncid, "maxobcorr_t", nf90_real, (/d_x, d_y, d_z/), v_maxobcor_t))
-       call check(nf90_def_var(ncid, "maxobcorr_s", nf90_real, (/d_x, d_y, d_z/), v_maxobcor_s))
-       
-
-       call check(nf90_enddef(ncid))
+       call check(nf90_create("ana_diag.nc", NF90_WRITE, ncid2))       
+       call check(nf90_def_dim(ncid2, "grid_x", grid_nx, d_x))
+       call check(nf90_def_var(ncid2, "grid_x", nf90_real, (/d_x/), v_x))
+       call check(nf90_put_att(ncid2, v_x, "units", "degrees_east"))
+       call check(nf90_def_dim(ncid2, "grid_y", grid_ny, d_y))
+       call check(nf90_def_var(ncid2, "grid_y", nf90_real, (/d_y/), v_y))
+       call check(nf90_put_att(ncid2, v_y, "units", "degrees_north"))
+       call check(nf90_def_dim(ncid2, "grid_z", grid_nz, d_z))
+       call check(nf90_def_var(ncid2, "grid_z", nf90_real, (/d_z/), v_z))
+       call check(nf90_put_att(ncid2, v_z, "units", "meters"))
+       call check(nf90_def_var(ncid2, "maxobcorr_t", nf90_real, (/d_x, d_y, d_z/), v_maxobcor_t))
+       call check(nf90_def_var(ncid2, "maxobcorr_s", nf90_real, (/d_x, d_y, d_z/), v_maxobcor_s))
+       call check(nf90_enddef(ncid2))
+   
     end if
     if(isroot) then
        allocate(tmp2d(grid_nx, grid_ny))
@@ -206,46 +211,52 @@ contains
     ! gather data from the procs as needed and save to file
     !------------------------------------------------------------
     ! depth
-    if(isroot) call check(nf90_put_var(ncid, v_z, grid_dpth))
+    if(isroot) call check(nf90_put_var(ncid1, v_z, grid_dpth))
+    if(isroot) call check(nf90_put_var(ncid2, v_z, grid_dpth))
 
     ! lat
     call g3dv_mpi_ij2grd_real(grid_local_lat, tmp2d)
-    if(isroot) call check(nf90_put_var(ncid, v_y, maxval(tmp2d, 1, tmp2d < 100)))
+    if(isroot) call check(nf90_put_var(ncid1, v_y, maxval(tmp2d, 1, tmp2d < 100)))
+    if(isroot) call check(nf90_put_var(ncid2, v_y, maxval(tmp2d, 1, tmp2d < 100)))
 
     ! lon
     call g3dv_mpi_ij2grd_real(grid_local_lon, tmp2d)
-    if(isroot) call check(nf90_put_var(ncid, v_x, tmp2d(:,1)))
+    if(isroot) call check(nf90_put_var(ncid1, v_x, tmp2d(:,1)))
+    if(isroot) call check(nf90_put_var(ncid2, v_x, tmp2d(:,1)))
+
 
     ! temp AI
     do i = 1, grid_nz
        tmpij = grd(i+grid_var_t-1,:)
        call g3dv_mpi_ij2grd_real(tmpij, tmp3d(:,:,i))
     end do
-    if(isroot) call check(nf90_put_var(ncid, v_ai_t, tmp3d))
+    if(isroot) call check(nf90_put_var(ncid1, v_ai_t, tmp3d))
 
     ! salt AI
     do i = 1, grid_nz
        tmpij = grd(i+grid_var_s-1,:)              
        call g3dv_mpi_ij2grd_real(tmpij, tmp3d(:,:,i))
     end do
-    if(isroot) call check(nf90_put_var(ncid, v_ai_s, tmp3d))
+    if(isroot) call check(nf90_put_var(ncid1, v_ai_s, tmp3d))
 
     ! other optional diagnostics
     do i = 1, grid_nz
        tmpij = solver_local_maxobcor(grid_var_t+i-1,:)
        call g3dv_mpi_ij2grd_real(tmpij, tmp3d(:,:,i))
     end do
-    if(isroot) call check(nf90_put_var(ncid, v_maxobcor_t, tmp3d))
+    if(isroot) call check(nf90_put_var(ncid2, v_maxobcor_t, tmp3d))
     do i = 1, grid_nz
        tmpij = solver_local_maxobcor(grid_var_s+i-1,:)
        call g3dv_mpi_ij2grd_real(tmpij, tmp3d(:,:,i))
     end do
-    if(isroot) call check(nf90_put_var(ncid, v_maxobcor_s, tmp3d))
+    if(isroot) call check(nf90_put_var(ncid2, v_maxobcor_s, tmp3d))
 
 
     ! all done, cleanup
     if(isroot) then
-       call check(nf90_close(ncid))
+       call check(nf90_close(ncid1))
+       call check(nf90_close(ncid2))
+
     end if
     deallocate(tmp2d)
     deallocate(tmp3d)
