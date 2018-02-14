@@ -179,8 +179,8 @@ contains
        call check(nf90_def_dim(ncid1, "grid_z", grid_nz, d_z))
        call check(nf90_def_var(ncid1, "grid_z", nf90_real, (/d_z/), v_z))
        call check(nf90_put_att(ncid1, v_z, "units", "meters"))
-       call check(nf90_def_var(ncid1, "ai_temp", nf90_real, (/d_x, d_y, d_z/), v_ai_t))
-       call check(nf90_def_var(ncid1, "ai_salt", nf90_real, (/d_x, d_y, d_z/), v_ai_s))
+       call check(nf90_def_var(ncid1, "Temp", nf90_real, (/d_x, d_y, d_z/), v_ai_t))
+       call check(nf90_def_var(ncid1, "Salt", nf90_real, (/d_x, d_y, d_z/), v_ai_s))
        call check(nf90_enddef(ncid1))
 
        ! other optional diagnostics
