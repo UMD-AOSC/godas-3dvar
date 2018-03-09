@@ -343,12 +343,17 @@ contains
        do i = 1, obs_num
           if(obs_qc(i) >0) cycle
 #ifdef __INTEL_COMPILER
-          if(ieee_is_nan(obs(i)%inc) .or. ieee_is_nan(obs(i)%err)) then
+          if(.not. ieee_is_finite(obs(i)%inc) .or. &
+             .not. ieee_is_finite(obs(i)%err) .or. &
+             .not. ieee_is_finite(obs(i)%val) then
              obs_qc(i) = 13
              i1 = i1 + 1
           end if
 #else
-          if(isnan(obs(i)%inc) .or. isnan(obs(i)%err)) then
+          !TODO, add Inf test
+          if(isnan(obs(i)%inc) .or. &
+             isnan(obs(i)%err) .or. &
+             isnan(obs(i)%val)) then
              obs_qc(i) = 13
              i1 = i1 + 1
           end if
