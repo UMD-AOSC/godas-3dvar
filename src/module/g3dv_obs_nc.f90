@@ -78,7 +78,7 @@ contains
 
     integer :: i
     integer :: ncid,dim_id
-    integer :: vid_obid, vid_lon, vid_lat, vid_depth, vid_inc, vid_err, vid_hr
+    integer :: vid_obid, vid_lon, vid_lat, vid_depth, vid_inc, vid_err, vid_hr, vid_qc
     integer :: nobs
     integer, allocatable :: tmp_i(:)
     real,    allocatable :: tmp_r(:)    
@@ -94,7 +94,8 @@ contains
     call check(nf90_inq_varid(ncid, "depth", vid_depth))
     call check(nf90_inq_varid(ncid, "inc",   vid_inc))
     call check(nf90_inq_varid(ncid, "err",   vid_err))
-    call check(nf90_inq_varid(ncid, "hr",   vid_hr))
+    call check(nf90_inq_varid(ncid, "hr",    vid_hr))
+    call check(nf90_inq_varid(ncid, "qc",    vid_qc))
 
     print *, "Observations in file: ", nobs
     allocate(obs(nobs))
@@ -122,6 +123,8 @@ contains
     call check(nf90_get_var(ncid, vid_hr, tmp_r))
     do i=1,nobs;   obs(i)%hr = tmp_r(i);   end do
 
+    call check(nf90_get_var(ncid, vid_qc, tmp_i))
+    do i=1,nobs;   obs(i)%qc = tmp_i(i); end do
 
     deallocate(tmp_i)
     deallocate(tmp_r)

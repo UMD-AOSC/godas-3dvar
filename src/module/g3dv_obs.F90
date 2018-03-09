@@ -43,6 +43,7 @@ module g3dv_obs
      real :: lon
      real :: dpth
      real :: hr
+     integer :: qc
 
      ! observation increment and error
      real :: inc
@@ -299,7 +300,16 @@ contains
        print *, ""
        print *, "Performing QC..."
 
-       
+       ! remove obs that came in as bad
+       i1 = 0
+       do i = 1, obs_num
+          if(obs(i)%qc /= 0) then
+             obs_qc(i) = obs(i)%qc
+             i1 = i1 + 1
+          end if
+       end do
+       print *, i1, " removed for QC BAD WHEN READ IN"
+
        ! remove obs types we dont want to assimilate
        i1 = 0
        do i = 1, obs_num
@@ -344,16 +354,14 @@ contains
           if(obs_qc(i) >0) cycle
 #ifdef __INTEL_COMPILER
           if(.not. ieee_is_finite(obs(i)%inc) .or. &
-             .not. ieee_is_finite(obs(i)%err) .or. &
-             .not. ieee_is_finite(obs(i)%val) then
+             .not. ieee_is_finite(obs(i)%err)) then
              obs_qc(i) = 13
              i1 = i1 + 1
           end if
 #else
           !TODO, add Inf test
           if(isnan(obs(i)%inc) .or. &
-             isnan(obs(i)%err) .or. &
-             isnan(obs(i)%val)) then
+             isnan(obs(i)%err)) then
              obs_qc(i) = 13
              i1 = i1 + 1
           end if
@@ -835,7 +843,7 @@ contains
   
   subroutine obs_mpi_init()
     !! define a derived type to MPI
-    integer, parameter :: n = 12
+    integer, parameter :: n = 13
     integer :: blocklen(n)
     integer :: type(n)
     integer(kind=mpi_address_kind) :: disp(n), base
@@ -849,11 +857,12 @@ contains
     call mpi_get_address(ob%hr,        disp( 5),  ierr)
     call mpi_get_address(ob%inc,       disp( 6),  ierr)
     call mpi_get_address(ob%err,       disp( 7),  ierr)
-    call mpi_get_address(ob%grd_w,     disp( 8), ierr)
-    call mpi_get_address(ob%grd_ssh,   disp( 9), ierr)    
-    call mpi_get_address(ob%grd_var,   disp(10), ierr)
-    call mpi_get_address(ob%grd_vtloc, disp(11), ierr)
-    call mpi_get_address(ob%grd_coast, disp(12), ierr)
+    call mpi_get_address(ob%qc,        disp( 8),  ierr)
+    call mpi_get_address(ob%grd_w,     disp( 9), ierr)
+    call mpi_get_address(ob%grd_ssh,   disp(10), ierr)    
+    call mpi_get_address(ob%grd_var,   disp(11), ierr)
+    call mpi_get_address(ob%grd_vtloc, disp(12), ierr)
+    call mpi_get_address(ob%grd_coast, disp(13), ierr)
     base = disp(1)
     do i=1,n
        disp(i) = disp(i) - base
@@ -863,8 +872,9 @@ contains
 
     type(1)     = mpi_integer
     type(2:7)   = mpi_real
-    type(8)     = grid_mpi_interpweights
-    type(9:12)  = mpi_real
+    type(8)     = mpi_integer
+    type(9)     = grid_mpi_interpweights
+    type(10:13) = mpi_real
     
     call mpi_type_create_struct(n, blocklen, disp, type, obs_mpi_observation, ierr)
     call mpi_type_commit(obs_mpi_observation, ierr)
