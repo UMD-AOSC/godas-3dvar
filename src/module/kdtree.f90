@@ -28,7 +28,7 @@ module kdtree
 
   ! public module methods
   !------------------------------------------------------------
-  public :: kd_root, kd_init
+  public :: kd_root, kd_init, kd_free
   public :: kd_search_radius, kd_search_nnearest
 
 
@@ -107,11 +107,28 @@ module kdtree
 contains
 
 
-
+  
   !================================================================================
   !================================================================================
 
 
+  
+  subroutine kd_free(root)
+    !! Frees up any resources associated with a kd tree created with kd_init
+    type(KD_ROOT), intent(out)  :: root
+
+    deallocate(root%ptindx)
+    deallocate(root%pts_ll)
+    deallocate(root%pts)
+    deallocate(root%boxes)
+  end subroutine kd_free
+
+
+  
+  !================================================================================
+  !================================================================================
+
+  
 
   subroutine kd_init(root, lons, lats)
     !! Initialize a kd-tree structure given a list of lat/lon pairs.
@@ -741,7 +758,9 @@ contains
     jold = 1
     j = 2
     do while (j <= n)
-       if (j < n .and. heap(j) < heap(j+1)) j = j+1
+       if ( j < n ) then
+          if ( heap(j) < heap(j+1)) j = j+1
+       end if
        if (a >= heap(j)) exit
        heap(jold) = heap(j)
        ndx(jold) = ndx(j)
