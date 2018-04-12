@@ -17,7 +17,8 @@ file( GLOB SRCS "*.[f,F]90" )
 #   PROPERTIES
 #   OUTPUT_NAME ${LIB_NAME})
 
-add_library( ${LIB_NAME}_static STATIC ${SRCS} )
+file( GLOB KDTREE_SRC "../geoKdTree/*.[f,F]90" )
+add_library( ${LIB_NAME}_static STATIC ${SRCS} ${KDTREE_SRC})
 set_target_properties( ${LIB_NAME}_static
   PROPERTIES
   OUTPUT_NAME ${LIB_NAME})
