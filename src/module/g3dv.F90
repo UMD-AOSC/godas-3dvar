@@ -26,6 +26,13 @@ module godas_3dvar
   logical :: initialized = .false.
   integer :: timer_total
 
+! use this to get the repository version at compile time
+#ifndef CVERSION
+#define CVERSION "Unknown"
+#endif
+#ifndef CTIME
+#define CTIME "Unknown"
+#endif
 
 
 contains
@@ -62,12 +69,15 @@ contains
     
     ! print header
     if(isroot) then
-       print *,new_line('a'),"============================================================",&
-            new_line('a'),"HYBRID-GODAS 3DVAR system",&
-            new_line('a')," preconditioned conjugate gradient solver in obs space",&
-            new_line('a')," Travis Sluka (travis.sluka@noaa.gov, tsluka@umd.edu)",&
-            new_line('a'),"============================================================",&
-            new_line('a')
+       print *, ""
+       print *,"============================================================"
+       print *, "HYBRID-GODAS 3DVAR system"
+       print *, "preconditioned conjugate gradient solver in obs space"
+       print *, ""
+       print *, " version:  ", CVERSION
+       print *, " compiled: ", CTIME
+       print *, "============================================================"
+       print *, ""
     end if
 
     

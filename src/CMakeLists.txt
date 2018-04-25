@@ -29,6 +29,15 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/mod)
 
+# determine the repository version and time
+execute_process(COMMAND git describe --dirty --tags --always OUTPUT_VARIABLE GIT_VERSION RESULT_VARIABLE RES OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT ${RES} EQUAL "0")
+  set(GIT_VERSION "Unknown")
+endif()
+add_definitions(-DCVERSION=\"${GIT_VERSION}\")
+string(TIMESTAMP TS %Y-%m-%d )
+add_definitions(-DCTIME=\"${TS}\")
+
 
 # required packages
 # ------------------------------------------------------------
