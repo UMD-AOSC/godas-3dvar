@@ -37,8 +37,10 @@ module g3dv_bgcov
   real, parameter :: pi = 4*atan(1.0)
   real, parameter :: re = 6371d3
   real, parameter :: omega = 7.29e-5
+  real, parameter :: d2r = pi / 180.0
   
   ! variables read in from namelist
+  real :: hz_loc_scale
   real :: hz_loc(2) = -1
   real :: vt_loc_max = -1
   real :: vt_loc_min = -1
@@ -49,8 +51,11 @@ module g3dv_bgcov
   real :: tnsr_coast_min  = 0.0
   real :: bgvar_t = -1
   real :: bgvar_s = -1
-  real :: hz_loc_scale = 2.0
-
+  real :: hzcor_min = 50e3
+  real :: hzcor_max = 150e3
+  real :: hzcor_cspd = 2.7
+  real :: hzcor_stretch_lat = 10
+  real :: hzcor_stretch_mul = 3.5
   
   interface loc
      module procedure loc_gc
@@ -76,7 +81,8 @@ contains
     real, allocatable :: tmp3d(:,:,:)
     real, allocatable :: tmpij(:)
 
-    namelist /g3dv_hzloc/ hz_loc, hz_loc_scale
+    namelist /g3dv_hzloc/ hz_loc, hz_loc_scale, &
+         hzcor_min, hzcor_max, hzcor_cspd, hzcor_stretch_lat, hzcor_stretch_mul
 
     namelist /g3dv_bgcov/ vt_loc_min, vt_loc_max,&
          vt_loc_diff_scale, time_loc, tnsr_surf, tnsr_coast_dist, tnsr_coast_min, bgvar_t, bgvar_s
@@ -107,11 +113,11 @@ contains
     if(isroot) then
        print *, ""
        print *, " Horizontal correlation length scales summary:"
-       print *, " Latitude         scale (km)"
+       print *, " Latitude         x-scale(km)     y-scale(km)"
        r = 0
        do while(r <= 90)
           print *, r, bgcov_hzdist(r)
-          r = r + 10.0
+          r = r + 2.5
        end do
     end if
 
@@ -195,9 +201,9 @@ contains
     type(observation), intent(in) :: ob1
     type(observation), intent(in) :: ob2
     real, optional, intent(in) :: dist
-    real :: cov
+    real :: cov, stretch
 
-    real :: dist0, r, vtloc_d
+    real :: dist0, r, vtloc_d, r2(2), distx, disty, lat0
     real :: hz_cor, vt_cor, time_cor, surf_tensor, coast_tensor
 
     cov = 0.0
@@ -219,17 +225,30 @@ contains
     if(present(dist)) then
        dist0 = dist
     else
-       r = sin(ob1%lat*pi/180.0)*sin(ob2%lat*pi/180.0) + &
-           cos(ob1%lat*pi/180.0)*cos(ob2%lat*pi/180.0)*&
-           cos((ob1%lon-ob2%lon)*pi/180.0)
+       r = sin(ob1%lat*d2r)*sin(ob2%lat*d2r) + &
+           cos(ob1%lat*d2r)*cos(ob2%lat*d2r)*&
+           cos((ob1%lon-ob2%lon)*d2r)
        if(r > 1)  r =  1
        if(r < -1) r = -1
        dist0 = re*acos(r)
     end if
 
     ! horizontal localization
-    hz_cor = loc(dist0, (bgcov_hzdist(ob1%lat)+ bgcov_hzdist(ob2%lat))/2.0)
+    lat0=(ob1%lat + ob2%lat)/2.0
+    r2=bgcov_hzdist(lat0)
+    if(r2(1) > r2(2)) then
+       distx=abs(ob1%lon - ob2%lon)
+       if (distx > 180) distx = 360.0 - distx
+       distx = distx * d2r * re * cos(abs(lat0)*d2r)
+       disty = abs(ob1%lat - ob2%lat)
+       disty = disty * d2r * re
+       hz_cor = loc(distx, r2(1)) * loc(disty, r2(2))
+    else
+       hz_cor = loc(dist0, r2(2))
+    end if
+
     if(hz_cor <= 0) return
+
 
 
     ! vertical localization distance is the average of vt_loc of the two points 
@@ -283,10 +302,10 @@ contains
     real,    intent(out) :: cor(grid_ns), var(grid_ns)
 
     real :: hz_cor, time_cor, surf_tensor, coast_tensor, vt_cor(grid_nz)
-    real :: vtloc_d
+    real :: vtloc_d, distx,disty
 
     integer :: i, idx_start
-    real :: r
+    real :: r, r2(2), lat0, stretch
 
 
     cor = 0.0
@@ -301,7 +320,18 @@ contains
 
 
     ! horizontal localization    
-    hz_cor = loc(dist, (bgcov_hzdist(grid_local_lat(ij))+ bgcov_hzdist(ob%lat))/2.0)
+    lat0=(grid_local_lat(ij) + ob%lat)/2.0
+    r2=bgcov_hzdist(lat0)
+    if(r2(1) > r2(2)) then
+       distx=abs(grid_local_lon(ij) - ob%lon)
+       if (distx > 180) distx = 360.0 - distx
+       distx = distx * d2r * re * cos(abs(lat0)*d2r)
+       disty = abs(grid_local_lat(ij) - ob%lat)
+       disty = disty * d2r * re
+       hz_cor = loc(distx, r2(1)) * loc(disty, r2(2))
+    else
+       hz_cor = loc(dist, r2(2))
+    end if
     if (hz_cor <= 0.0) return
 
 
@@ -370,17 +400,18 @@ contains
 
   pure function bgcov_hzdist(lat) result(cor)
     real, intent(in) :: lat
-    real :: cor
-    ! linear interpolation from EQ to Pole
-    !    cor = hz_loc(2) + (hz_loc(1)-hz_loc(2))*(1.0-(abs(lat)/90.0))
-
-    ! more accurate rossby radius calculation
+    real :: cor(2)
+    
+    ! correlation length based on rossby radius calculation
     if ( abs(lat) < 0.1) then
-       cor = hz_loc(1)
+       cor = hzcor_max
     else
-       cor = max(hz_loc(2), min(hz_loc(1), &
-            hz_loc_scale*2.6/(2*omega*abs(sin(lat*pi/180.0))) ))
+       cor = max(hzcor_min, min(hzcor_max, hzcor_cspd/(2*omega*abs(sin(lat*d2r))) ))
     end if
+
+    ! stretching along equator
+    cor(1) = cor(1)*(1 + (hzcor_stretch_mul-1.0)*loc_gc(lat, hzcor_stretch_lat * 0.5* sqrt(0.3)))
+
   end function bgcov_hzdist
 
 
