@@ -5,7 +5,7 @@ set( EXE godas_3dvar )
 
 # required packages
 #------------------------------------------------------------
-include_directories(${NETCDF_INCLUDES})
+#include_directories(${NETCDF_INCLUDE_DIR})
 #include_directories(${CMAKE_BINARY_DIR}/3dvar_module)
 
 
@@ -19,7 +19,7 @@ set(3DVAR_LIB ${3DVAR_LIB_STATIC})
 # ------------------------------------------------------------
 file( GLOB SRCS "*.[f,F]90")
 add_executable(${EXE} ${SRCS})
-target_link_libraries(${EXE} ${NETCDF_LIBRARIES_F77})
+target_link_libraries(${EXE} ${NETCDF_LIBRARIES})
 target_link_libraries(${EXE} ${3DVAR_LIB})
 target_link_libraries(${EXE} ${MPI_Fortran_LIBRARIES})
 target_link_libraries(${EXE} ${LAPACK_LIBRARIES})
