@@ -5,7 +5,7 @@ set( LIB_NAME 3dvar)
 
 # required packages
 #------------------------------------------------------------
-include_directories(${NETCDF_INCLUDE_DIR})
+include_directories(${NETCDF_INCLUDE_DIRS})
 include_directories(${MPI_Fortran_INCLUDE_PATH})
 
 
