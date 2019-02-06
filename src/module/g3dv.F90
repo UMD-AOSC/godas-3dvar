@@ -75,7 +75,6 @@ contains
        print *, "preconditioned conjugate gradient solver in obs space"
        print *, ""
        print *, " version:  ", CVERSION
-       print *, " compiled: ", CTIME
        print *, "============================================================"
        print *, ""
     end if
@@ -168,7 +167,7 @@ contains
     integer :: d_x, d_y, d_z, d_t
     integer :: v_x, v_y, v_z, v_t
     integer :: v_ai_t, v_ai_s
-    integer :: v_maxobcor_t, v_maxobcor_s
+    integer :: v_maxobcor_t, v_maxobcor_s, v_vtcor, v_var_t, v_var_s
 
     real, allocatable :: tmp2d(:,:)
     real, allocatable :: tmp3d(:,:,:)
@@ -259,6 +258,9 @@ contains
        call check(nf90_put_att(ncid2, v_z, "units", "meters"))
        call check(nf90_def_var(ncid2, "maxobcorr_t", nf90_real, (/d_x, d_y, d_z/), v_maxobcor_t))
        call check(nf90_def_var(ncid2, "maxobcorr_s", nf90_real, (/d_x, d_y, d_z/), v_maxobcor_s))
+       call check(nf90_def_var(ncid2, "vtcor", nf90_real, (/d_x, d_y, d_z/), v_vtcor))
+       call check(nf90_def_var(ncid2, "var_t", nf90_real, (/d_x, d_y, d_z/), v_var_t))
+       call check(nf90_def_var(ncid2, "var_s", nf90_real, (/d_x, d_y, d_z/), v_var_s))       
        call check(nf90_enddef(ncid2))
     end if
 
@@ -284,6 +286,26 @@ contains
        call g3dv_mpi_ij2grd_real(tmpij, tmp3d(:,:,i))
     end do
     if(isroot) call check(nf90_put_var(ncid2, v_maxobcor_s, tmp3d))
+
+    do i = 1, grid_nz
+       tmpij = bgcov_local_var_t(i,:)
+       call g3dv_mpi_ij2grd_real(tmpij, tmp3d(:,:,i))
+    end do
+    if(isroot) call check(nf90_put_var(ncid2, v_var_t, tmp3d))
+
+    do i = 1, grid_nz
+       tmpij = bgcov_local_var_s(i,:)
+       call g3dv_mpi_ij2grd_real(tmpij, tmp3d(:,:,i))
+    end do
+    if(isroot) call check(nf90_put_var(ncid2, v_var_s, tmp3d))
+
+    do i = 1, grid_nz
+       tmpij = bgcov_local_vtloc(i,:)
+       call g3dv_mpi_ij2grd_real(tmpij, tmp3d(:,:,i))
+    end do
+    if(isroot) call check(nf90_put_var(ncid2, v_vtcor, tmp3d))
+
+    
 
 
     ! all done, cleanup

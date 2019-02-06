@@ -10,7 +10,7 @@ module g3dv_grid
   use timing
   use g3dv_datatable, only : datatable_get
   use g3dv_mpi
-
+  use gsw_mod_toolbox
   use mpi
 
   implicit none
@@ -61,7 +61,11 @@ module g3dv_grid
   real, public, protected, allocatable :: grid_local_ssh(:) 
   real, public, protected, allocatable :: grid_local_coastdist(:) 
   real, public, protected, allocatable :: grid_local_D(:)
-
+  
+  real, public, protected, allocatable :: grid_local_temp(:,:)
+  real, public, protected, allocatable :: grid_local_salt(:,:)
+  real, public, protected, allocatable :: grid_local_rho(:,:)
+  
 
 
   ! private module variables
@@ -126,10 +130,12 @@ contains
     character(len=*), intent(in) :: nml
 
     real, allocatable :: tree_lons(:), tree_lats(:)
-    integer :: x, y, i
+    integer :: x, y, i, j
     integer :: unit
     integer :: timer
 
+    real(kind=8) :: ct, p, sa, rho
+    
     real, allocatable :: tmp2d(:,:)
     real, allocatable :: tmp3d(:,:,:)
     real, allocatable :: tmpij(:)
@@ -183,8 +189,8 @@ contains
     allocate(grid_local_mask(g3dv_mpi_ijcount))
     allocate(grid_local_D(g3dv_mpi_ijcount))
     allocate(grid_local_ssh(g3dv_mpi_ijcount))
-    allocate(grid_local_coastdist(g3dv_mpi_ijcount))    
-!    allocate(grid_local_diag3D_2(grid_ns, g3dv_mpi_ijcount))
+    allocate(grid_local_coastdist(g3dv_mpi_ijcount))
+    
     allocate(tmpij(g3dv_mpi_ijcount))
     if(isroot) then
        allocate(tmp2d(grid_nx, grid_ny))
@@ -285,10 +291,48 @@ contains
        call datatable_get('bg_ssh', tmp2d)
     end if
     call g3dv_mpi_grd2ij_real(tmp2d, grid_local_ssh)
-    
 
+
+    ! read in Temp/Salt, so that we can calculate density
+    allocate(grid_local_temp(grid_nz,g3dv_mpi_ijcount))
+    allocate(grid_local_salt(grid_nz,g3dv_mpi_ijcount))
+    allocate(grid_local_rho(grid_nz,g3dv_mpi_ijcount))
+    
+    if(isroot) then
+       call datatable_get('bg_t', tmp3d)       
+    end if
+    do i=1,grid_nz
+       call g3dv_mpi_grd2ij_real(tmp3d(:,:,i), tmpij)
+       grid_local_temp(i,:) = tmpij
+    end do
+
+    if(isroot) then
+       call datatable_get('bg_s', tmp3d)       
+    end if
+    do i=1,grid_nz
+       call g3dv_mpi_grd2ij_real(tmp3d(:,:,i), tmpij)
+       grid_local_salt(i,:) = tmpij
+    end do
+
+    ! using T/S, calculate the density           
+    grid_local_rho = 0.0
+    do i=1,g3dv_mpi_ijcount
+       if (grid_local_mask(i) <= 0) cycle
+       
+       do j=1,grid_nz
+          if ( grid_dpth(j) > grid_local_D(i)) EXIT
+          p=gsw_p_from_z(-grid_dpth(j)*1d0, grid_local_lat(i)*1d0)
+          sa=gsw_sa_from_sp(grid_local_salt(j,i)*1d0, p, grid_local_lon(i)*1d0, grid_local_lat(i)*1d0)
+          ct=gsw_ct_from_pt(sa, grid_local_temp(j,i)*1d0)
+          rho=gsw_rho(sa,ct, 0d0)          
+          grid_local_rho(j, i) = rho
+       end do
+    end do
+        
+    
     ! done, cleanup
     !------------------------------------------------------------
+    
     deallocate(tmp2d)
     deallocate(tmp3d)
     deallocate(tmpij)

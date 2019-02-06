@@ -29,6 +29,8 @@ module g3dv_mpi
   public :: g3dv_mpi_grd2ij_int  
   public :: g3dv_mpi_ij2grd_real
 
+  public :: g3dv_mpi_zij2xyk_real
+  public :: g3dv_mpi_xyk2zij_real
 
 
   ! public module variables
@@ -41,7 +43,8 @@ module g3dv_mpi
 
   integer, public, protected :: g3dv_mpi_ijcount
 
-
+  integer, public, protected :: g3dv_mpi_kcount
+  
 
   ! private module variables
   !------------------------------------------------------------
@@ -150,7 +153,7 @@ contains
     grid_nz = nz
 
 
-    ! calculate the number of gridpoints to use for each proc
+    ! calculate the number of gridpoints to use for each proc (when distributing columns)
 
     allocate(scatterv_count(g3dv_mpi_size))
     allocate(scatterv_displ(g3dv_mpi_size))
@@ -181,6 +184,12 @@ contains
        end if
     end if
 
+    ! calculate the number of levels to use for each proc (when distributing hz slabs)    
+    i=grid_nz / g3dv_mpi_size
+    j=grid_nz - i*g3dv_mpi_size    
+    if(j > g3dv_mpi_rank ) i = i + 1
+    g3dv_mpi_kcount = i
+
   end subroutine g3dv_mpi_setgrid
 
 
@@ -190,21 +199,29 @@ contains
 
 
 
-  subroutine g3dv_mpi_grd2ij_real(grd, ij)
+  subroutine g3dv_mpi_grd2ij_real(grd, ij, rank)
     !! takes a single grid on the root process and distributes portions of it to 
     !! worker processes
 
     real, intent(in) :: grd(grid_nx*grid_ny)
     real, intent(inout) :: ij(g3dv_mpi_ijcount)
-
+    integer, intent(in), optional :: rank
+    
+    integer :: rank0
     integer :: ierr, i, j 
     real :: wrk(grid_nx*grid_ny)
 
+    if (present(rank)) then
+       rank0 = rank
+    else
+       rank0 = g3dv_mpi_root
+    end if
+
     if (.not. interleave) then
        call mpi_scatterv(grd, scatterv_count, scatterv_displ, mpi_real, &
-            ij, g3dv_mpi_ijcount, mpi_real, g3dv_mpi_root, g3dv_mpi_comm, ierr)
+            ij, g3dv_mpi_ijcount, mpi_real, rank0, g3dv_mpi_comm, ierr)
     else
-       if (g3dv_mpi_isroot) then
+       if (rank0 == g3dv_mpi_rank) then
           do i = 1, g3dv_mpi_size
              do j = 1, scatterv_count(i)
                 wrk(scatterv_displ(i)+j) = grd((j-1)*g3dv_mpi_size+i)
@@ -212,7 +229,7 @@ contains
           end do
        end if
        call mpi_scatterv(wrk, scatterv_count, scatterv_displ, mpi_real, &
-            ij, g3dv_mpi_ijcount, mpi_real, g3dv_mpi_root, g3dv_mpi_comm, ierr)
+            ij, g3dv_mpi_ijcount, mpi_real, rank0, g3dv_mpi_comm, ierr)
     end if
   end subroutine g3dv_mpi_grd2ij_real
 
@@ -273,9 +290,15 @@ contains
        call mpi_gatherv(ij, g3dv_mpi_ijcount, mpi_real, &
             grd, scatterv_count, scatterv_displ, mpi_real, rank0, g3dv_mpi_comm, ierr)
     else
-       call mpi_gatherv(ij, g3dv_mpi_ijcount, mpi_real, &
-            wrk, scatterv_count, scatterv_displ, mpi_real, rank0, g3dv_mpi_comm, ierr)
-       if(rank0 == g3dv_mpi_rank) then
+       if(rank0 >= 0) then
+          call mpi_gatherv(ij, g3dv_mpi_ijcount, mpi_real, &
+               wrk, scatterv_count, scatterv_displ, mpi_real, rank0, g3dv_mpi_comm, ierr)
+       else
+          call mpi_allgatherv(ij, g3dv_mpi_ijcount, mpi_real, &
+               wrk, scatterv_count, scatterv_displ, mpi_real, g3dv_mpi_comm, ierr)
+       end if
+          
+       if(rank0 == g3dv_mpi_rank .or. rank0 < 0) then
           do i = 1, g3dv_mpi_size
              do j = 1, scatterv_count(i)
                 grd((j-1)*g3dv_mpi_size+i) = wrk(scatterv_displ(i)+j)
@@ -290,6 +313,60 @@ contains
   !================================================================================
   !================================================================================
 
+  subroutine g3dv_mpi_zij2xyk_real(zij, xyk)
+    real, intent(in) :: zij(grid_nz, g3dv_mpi_ijcount)
+    real, intent(inout) :: xyk(grid_nx, grid_ny, g3dv_mpi_kcount)
+
+    !    real,allocatable :: tmp3d(:,:,:)
+    real :: tmp2d(grid_nx, grid_ny)
+    real :: tmpij(g3dv_mpi_ijcount)
+    integer :: i, dest, nk
+    
+    nk=0
+    dest = 0    
+    do i =1, grid_nz
+       tmpij = zij(i,:)
+       
+       call g3dv_mpi_ij2grd_real(tmpij, tmp2d, dest)
+       if(dest == g3dv_mpi_rank) then
+          nk = nk+1
+          xyk(:,:,nk) = tmp2d
+       end if
+
+       dest = dest + 1
+       if (dest == g3dv_mpi_size) dest=0
+    end do
+       
+  end subroutine g3dv_mpi_zij2xyk_real
+
+  !================================================================================
+  !================================================================================
+
+  subroutine g3dv_mpi_xyk2zij_real(xyk, zij)
+    real, intent(in) :: xyk(grid_nx, grid_ny, g3dv_mpi_kcount)
+    real, intent(inout) :: zij(grid_nz, g3dv_mpi_ijcount)
+
+    real :: tmp2d(grid_nx, grid_ny)
+    real :: tmpij(g3dv_mpi_ijcount)
+    integer :: i, nk, src
+
+    nk=0
+    src=0
+    do i=1, grid_nz
+       if(src == g3dv_mpi_rank) then
+          nk=nk+1
+          tmp2d=xyk(:,:,nk)
+       end if
+       call g3dv_mpi_grd2ij_real(tmp2d, tmpij, src)
+       zij(i,:) = tmpij
+
+       src = src + 1
+       if (src == g3dv_mpi_size) src=0
+    end do
+  end subroutine g3dv_mpi_xyk2zij_real
+
+  !================================================================================
+  !================================================================================
 
 
   subroutine g3dv_mpi_final

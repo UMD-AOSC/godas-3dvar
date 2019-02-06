@@ -7,7 +7,7 @@ set( LIB_NAME 3dvar)
 #------------------------------------------------------------
 include_directories(${NETCDF_INCLUDE_DIRS})
 include_directories(${MPI_Fortran_INCLUDE_PATH})
-
+include_directories(${gsw_INCLUDE_DIRS})
 
 # build target
 #------------------------------------------------------------
