@@ -10,3 +10,5 @@ set(SRCS
 set( EXE 3dvardriver )
 add_executable(${EXE} ${SRCS})
 target_link_libraries(${EXE} 3dvar)
+target_link_libraries(${EXE} ${LAPACK_LIBRARIES})
+target_link_libraries(${EXE} gsw)

@@ -1,0 +1,27 @@
+! varname (in 3dvar) |  varname (in file)  | netcdf file
+!------------------------------------------------------------
+
+! Grid parameters
+!------------------------------------------------------------
+"grid_x",	"geolon",	"INPUT/hgrid.nc",
+"grid_y",	"geolat",	"INPUT/hgrid.nc",
+"grid_z",	"Layer",	"INPUT/vgrid.nc"
+"grid_mask",	"wet",		"INPUT/hgrid.nc"
+"grid_D",	"D",		"INPUT/hgrid.nc"
+"grid_coast",	"coast_dist",   "INPUT/coast_dist.nc"
+
+
+
+! background input fields
+!------------------------------------------------------------
+"bgvar_t",	"bgvar_t",	"bgvar.nc"
+"bgvar_s",	"bgvar_s",	"bgvar.nc"
+"bg_t",		"Temp",		"mem_0000.diag.20040101.nc"
+"bg_s",		"Salt",		"mem_0000.diag.20040101.nc"
+"bg_ssh",	"SSH",		"mem_0000.diag.20040101.nc"
+
+
+! other 3dvar input fields
+!------------------------------------------------------------
+"vtloc",	"vtloc",	"vtloc.nc"   
+"t_varmin_surf", "inc_rms",     "INPUT/bgvar_min.nc"

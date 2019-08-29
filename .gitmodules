@@ -1,3 +1,6 @@
 [submodule "src/geoKdTree"]
 	path = src/geoKdTree
 	url = https://github.com/travissluka/geoKdTree.git
+[submodule "src/GSW-Fortran"]
+	path = src/GSW-Fortran
+	url = git@github.com:TEOS-10/GSW-Fortran.git
