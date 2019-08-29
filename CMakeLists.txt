@@ -1,7 +1,5 @@
-cmake_minimum_required(VERSION 2.8 FATAL_ERROR)
-
-
-project(godas3dvar Fortran C)
+cmake_minimum_required(VERSION 3.2 FATAL_ERROR)
+project(godas3dvar Fortran C CXX)
 
 
 # global compiler options
@@ -23,7 +21,6 @@ endif()
 
 # other global variables
 # ------------------------------
-LIST(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -41,15 +38,23 @@ endif()
 add_definitions(-DCVERSION=\"${GIT_VERSION}\")
 
 
-# required packages
 # ------------------------------------------------------------
-find_package(LAPACK)
+# dependencies
+# ------------------------------------------------------------
+LIST(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
+# MPI
 find_package(MPI REQUIRED)
 
-set(NETCDF_90 "YES")
+# NetCDF
+set(NETCDF_F90 "YES")
 find_package(NetCDF REQUIRED)
 
+# LAPACK / BLAS
+# If intel, assume the mkl library is used
+IF(NOT CMAKE_C_COMPILER_ID MATCHES Intel)
+  find_package(LAPACK REQUIRED)
+ENDIF()
 
 
 # subprojects
