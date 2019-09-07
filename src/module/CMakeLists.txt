@@ -31,7 +31,9 @@ target_link_libraries(3dvar PRIVATE ${MPI_Fortran_LIBRARIES})
 include_directories(${NETCDF_INCLUDE_DIRS})
 target_link_libraries(3dvar PRIVATE ${NETCDF_LIBRARIES})
 
+# GSW
 include_directories(${gsw_INCLUDE_DIRS})
+target_link_libraries(3dvar PRIVATE gsw)
 
 # LAPACK
 target_link_libraries(3dvar  PRIVATE ${LAPACK_LIBRARIES})
